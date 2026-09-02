@@ -24,44 +24,12 @@
 
 	// Active tab for Pitch Contour demo
 	let selectedToneTab = $state<1 | 2 | 3 | 4>(3);
-	let activePhonemeFilter = $state<'all' | 'initial' | 'final_tone'>('all');
 	let showRawXApiModal = $state(false);
 	let selectedStatement = $state<any>(null);
-
-	// Filtered phoneme details
-	const filteredPhonemes = $derived(
-		(stats?.phonemeBreakdown || []).filter((p) => {
-			if (activePhonemeFilter === 'all') return true;
-			return p.type === activePhonemeFilter;
-		})
-	);
-
 	// Articulatory guidance boxes selected from actually-detected weak points
 	const articulationGuides = $derived(
 		selectArticulationGuides(stats?.weakPhonemes ?? [], stats?.weakTones ?? [])
 	);
-
-	function getScorePill(score: number): { bg: string; text: string; label: string } {
-		if (score >= 80) {
-			return {
-				bg: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
-				text: 'text-emerald-600 dark:text-emerald-400',
-				label: 'ดีมาก'
-			};
-		}
-		if (score >= 60) {
-			return {
-				bg: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
-				text: 'text-amber-600 dark:text-amber-400',
-				label: 'พอใช้'
-			};
-		}
-		return {
-			bg: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
-			text: 'text-rose-600 dark:text-rose-400',
-			label: 'ควรฝึก'
-		};
-	}
 
 	function viewXApiStatement(ev: any) {
 		selectedStatement = ev.xapiStatement;
@@ -349,64 +317,6 @@
 			</div>
 		</section>
 
-		<!-- 6. ความแม่นยำรายเสียง (Phoneme Breakdown) -->
-		<section class="rounded-3xl border bg-card p-5 space-y-4 shadow-sm">
-			<div class="flex items-center justify-between border-b pb-3">
-				<h2 class="text-base font-bold text-foreground">ความแม่นยำรายหน่วยเสียง</h2>
-
-				<!-- Filter Chips -->
-				<div class="flex items-center gap-1 bg-muted/60 p-1 rounded-xl text-xs">
-					<button
-						type="button"
-						onclick={() => (activePhonemeFilter = 'all')}
-						class="rounded-lg px-2 py-0.5 font-bold transition {activePhonemeFilter === 'all'
-							? 'bg-background text-foreground shadow-sm'
-							: 'text-muted-foreground'}"
-					>
-						ทั้งหมด
-					</button>
-					<button
-						type="button"
-						onclick={() => (activePhonemeFilter = 'initial')}
-						class="rounded-lg px-2 py-0.5 font-bold transition {activePhonemeFilter === 'initial'
-							? 'bg-background text-foreground shadow-sm'
-							: 'text-muted-foreground'}"
-					>
-						พยัญชนะ
-					</button>
-					<button
-						type="button"
-						onclick={() => (activePhonemeFilter = 'final_tone')}
-						class="rounded-lg px-2 py-0.5 font-bold transition {activePhonemeFilter === 'final_tone'
-							? 'bg-background text-foreground shadow-sm'
-							: 'text-muted-foreground'}"
-					>
-						สระ/เสียง
-					</button>
-				</div>
-			</div>
-
-			{#if filteredPhonemes.length === 0}
-				<p class="text-xs text-muted-foreground text-center py-4">ยังไม่มีข้อมูลรายเสียง</p>
-			{:else}
-				<div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5">
-					{#each filteredPhonemes as item (item.phoneme)}
-						{@const pill = getScorePill(item.avgGop)}
-						<div class="rounded-xl border p-2.5 text-center space-y-1 bg-background">
-							<div class="font-mono text-base font-black text-foreground">
-								/{item.phoneme}/
-							</div>
-							<div class="text-xs font-bold {pill.text}">
-								{item.avgGop}
-							</div>
-							<div class="text-[10px] text-muted-foreground">
-								{item.totalAttempts} ครั้ง
-							</div>
-						</div>
-					{/each}
-				</div>
-			{/if}
-		</section>
 	{/if}
 
 	<!-- 7. RESEARCH & AUDIT LOGS (Collapsible for Clean Minimalism) -->

@@ -9,6 +9,7 @@ import {
 	recordLearningEvent,
 	recordUserConsent
 } from '$lib/server/db';
+import { recordPhonemesToNeon } from '$lib/server/neon';
 import type { StandardTelemetryPayload } from '$lib/telemetry/adapter';
 
 // GET /api/v1/telemetry/score-ingest (Health & Contract Specification Check)
@@ -196,6 +197,17 @@ export const POST = async ({ locals, request, url, getClientAddress }: RequestEv
 				phoneme_details: standardPayload.scores.phoneme_details
 			}
 		});
+
+		// F. Archive granular phoneme evaluations directly into Neon PostgreSQL for Research
+		if (standardPayload.scores.phoneme_details && standardPayload.scores.phoneme_details.length > 0) {
+			recordPhonemesToNeon({
+				userId,
+				wordId: standardPayload.word_id,
+				pinyin: standardPayload.pinyin,
+				phonemeDetails: standardPayload.scores.phoneme_details,
+				xapiStatement: xapiBundle.pronouncedStatement
+			}).catch((neonErr) => console.warn('⚠️ [Neon Ingestion Non-Fatal]:', neonErr));
+		}
 	} catch (dbErr) {
 		console.warn('⚠️ [Telemetry Ingestion DB Error - non-fatal]:', dbErr);
 	}
