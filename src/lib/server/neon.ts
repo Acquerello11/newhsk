@@ -5,8 +5,10 @@ import type { TargetPhonemeDetail } from '$lib/telemetry/adapter';
 
 const NEON_URL =
 	env.NEON_DATABASE_URL ||
+	env.DATABASE_URL ||
 	process.env.NEON_DATABASE_URL ||
-	'postgresql://neondb_owner:npg_r0PXAKtfN6pU@ep-fragrant-union-azixkbg8-pooler.c-3.ap-southeast-1.aws.neon.tech/neondb?sslmode=require';
+	process.env.DATABASE_URL ||
+	'postgresql://neondb_owner:npg_r0PXAKtfN6pU@ep-fragrant-union-azixkbg8-pooler.c-3.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
 
 let isSchemaInitialized = false;
 
