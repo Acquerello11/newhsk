@@ -13,9 +13,9 @@ let db: Client | null = null;
 
 export function getDb(): Client | null {
 	if (db) return db;
-	const rawUrl = env.TURSO_DATABASE_URL?.trim();
-	const authToken = env.TURSO_AUTH_TOKEN?.trim();
-	const url = rawUrl || (isServerless ? '' : 'file:data/hsk.db');
+	const rawUrl = env.TURSO_DATABASE_URL?.trim() || process.env.TURSO_DATABASE_URL?.trim();
+	const authToken = env.TURSO_AUTH_TOKEN?.trim() || process.env.TURSO_AUTH_TOKEN?.trim();
+	const url = rawUrl || '';
 
 	if (!url) {
 		return null;
@@ -809,7 +809,44 @@ export async function getUserConsent(
 // Comprehensive Diagnostic Analytics (LQ5, LQ6, Phoneme & Tone Breakdown)
 // -------------------------------------------------------------
 
-export async function getDiagnosticAnalytics(userId: string) {
+export type DiagnosticAnalytics = {
+	hasData: boolean;
+	totalAttempts: number;
+	overallAccuracy: number | null;
+	avgPer: number | null;
+	avgToneScore: number | null;
+	toneAccuracy: Record<
+		'tone1' | 'tone2' | 'tone3' | 'tone4',
+		{ name: string; accuracy: number | null; count: number; isWeak: boolean }
+	>;
+	listeningImpact: {
+		withListeningAvgScore: number | null;
+		withoutListeningAvgScore: number | null;
+		scoreDelta: number | null;
+		sampleWith: number;
+		sampleWithout: number;
+	};
+	hesitationStats: { avgLatencyMs: number | null; sampleCount: number };
+	phonemeBreakdown: Array<{ phoneme: string; type: string; avgGop: number; totalAttempts: number }>;
+	frequentSubstitutions: Array<{
+		target: string;
+		recognized: string;
+		type: string;
+		count: number;
+		avgGop: number;
+	}>;
+	weakPhonemes: string[];
+	weakTones: number[];
+};
+
+const TONE_NAMES: Record<number, string> = {
+	1: 'เสียง 1 (ราบสูง 55)',
+	2: 'เสียง 2 (เสียงขึ้น 35)',
+	3: 'เสียง 3 (ต่ำ-ขึ้น 214)',
+	4: 'เสียง 4 (ตกฮวบ 51)'
+};
+
+export async function getDiagnosticAnalytics(userId: string): Promise<DiagnosticAnalytics | null> {
 	const client = getDb();
 	if (!client) {
 		return null;
@@ -822,20 +859,20 @@ export async function getDiagnosticAnalytics(userId: string) {
 	// 2. Fetch Learning Events (xAPI statements)
 	const events = await getLearningEvents(userId, undefined, 500);
 
-	let totalAttempts = evalList.length;
+	const totalAttempts = evalList.length;
+	const toneStats: Record<number, { total: number; sumScore: number }> = {
+		1: { total: 0, sumScore: 0 },
+		2: { total: 0, sumScore: 0 },
+		3: { total: 0, sumScore: 0 },
+		4: { total: 0, sumScore: 0 }
+	};
+
+	const substitutionsMap: Record<string, { target: string; recognized: string; type: string; count: number; totalGop: number }> = {};
+	const phonemeScoresMap: Record<string, { phoneme: string; type: string; total: number; sumGop: number }> = {};
+
 	let totalGop = 0;
 	let totalPer = 0;
 	let totalTone = 0;
-
-	const toneStats: Record<number, { total: number; sumScore: number; passed: number }> = {
-		1: { total: 0, sumScore: 0, passed: 0 },
-		2: { total: 0, sumScore: 0, passed: 0 },
-		3: { total: 0, sumScore: 0, passed: 0 },
-		4: { total: 0, sumScore: 0, passed: 0 }
-	};
-
-	const substitutionsMap: Record<string, { target: string; recognized: string; type: string; count: number; avgGop: number; totalGop: number }> = {};
-	const phonemeScoresMap: Record<string, { phoneme: string; type: string; total: number; sumGop: number }> = {};
 
 	for (const ev of evalList) {
 		totalGop += ev.scores.gop_overall;
@@ -857,7 +894,7 @@ export async function getDiagnosticAnalytics(userId: string) {
 			if (p.status === 'substitution' && p.target && p.recognized && p.target !== p.recognized) {
 				const key = `${p.target}->${p.recognized}`;
 				if (!substitutionsMap[key]) {
-					substitutionsMap[key] = { target: p.target, recognized: p.recognized, type: p.type, count: 0, avgGop: 0, totalGop: 0 };
+					substitutionsMap[key] = { target: p.target, recognized: p.recognized, type: p.type, count: 0, totalGop: 0 };
 				}
 				substitutionsMap[key].count++;
 				substitutionsMap[key].totalGop += Number(p.gop ?? 0);
@@ -869,32 +906,24 @@ export async function getDiagnosticAnalytics(userId: string) {
 				if (toneNum >= 1 && toneNum <= 4) {
 					toneStats[toneNum].total++;
 					toneStats[toneNum].sumScore += Number(p.gop ?? 0);
-					if (p.status === 'correct' || (p.gop && p.gop >= 75)) {
-						toneStats[toneNum].passed++;
-					}
 				}
 			}
 		}
 	}
 
-	// Calculate overall averages
-	const overallAccuracy = totalAttempts > 0 ? Number((totalGop / totalAttempts).toFixed(1)) : 82.5;
-	const avgPer = totalAttempts > 0 ? Number((totalPer / totalAttempts).toFixed(2)) : 0.18;
-	const avgToneScore = totalAttempts > 0 ? Number((totalTone / totalAttempts).toFixed(1)) : 80.0;
-
 	// LQ5 Analysis: Score with listening vs without listening
-	let listenedScores: number[] = [];
-	let notListenedScores: number[] = [];
-
-	// Map pronounced events to see listening context
 	const pronouncedEvents = events.filter((e) => e.eventType === 'pronounced');
 	const listeningEvents = events.filter((e) => e.eventType === 'listened_to_example');
 	const hesitationEvents = events.filter((e) => e.eventType === 'hesitated');
 
+	const listenedScores: number[] = [];
+	const notListenedScores: number[] = [];
 	for (const p of pronouncedEvents) {
 		const score = Number(p.xapiStatement?.result?.score?.raw ?? 0);
 		const word = p.wordId;
-		const hadListened = listeningEvents.some((l) => l.wordId === word && Math.abs(l.createdAt - p.createdAt) < 60000);
+		const hadListened = listeningEvents.some(
+			(l) => l.wordId === word && Math.abs(l.createdAt - p.createdAt) < 60000
+		);
 		if (hadListened) {
 			listenedScores.push(score);
 		} else {
@@ -902,91 +931,87 @@ export async function getDiagnosticAnalytics(userId: string) {
 		}
 	}
 
-	const withListeningAvg = listenedScores.length > 0
-		? Number((listenedScores.reduce((a, b) => a + b, 0) / listenedScores.length).toFixed(1))
-		: 89.2;
-	const withoutListeningAvg = notListenedScores.length > 0
-		? Number((notListenedScores.reduce((a, b) => a + b, 0) / notListenedScores.length).toFixed(1))
-		: 71.4;
-	const scoreDelta = Number((withListeningAvg - withoutListeningAvg).toFixed(1));
+	const avg = (arr: number[]): number | null =>
+		arr.length > 0 ? Number((arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1)) : null;
+
+	const withListeningAvg = avg(listenedScores);
+	const withoutListeningAvg = avg(notListenedScores);
+	const scoreDelta =
+		withListeningAvg !== null && withoutListeningAvg !== null
+			? Number((withListeningAvg - withoutListeningAvg).toFixed(1))
+			: null;
 
 	// LQ6 Analysis: Hesitation latency breakdown
-	let totalHesitationMs = 0;
-	let hesitationCount = 0;
-	for (const h of hesitationEvents) {
-		const lat = Number(h.xapiStatement?.result?.extensions?.['https://hsk.app/xapi/ext/hesitation-latency-ms'] ?? 0);
-		if (lat > 0) {
-			totalHesitationMs += lat;
-			hesitationCount++;
-		}
-	}
-	const avgHesitationMs = hesitationCount > 0 ? Math.round(totalHesitationMs / hesitationCount) : 3250;
+	const hesitationLatencies = hesitationEvents
+		.map((h) => Number(h.xapiStatement?.result?.extensions?.['https://hsk.app/xapi/ext/hesitation-latency-ms'] ?? 0))
+		.filter((lat) => lat > 0);
+	const avgHesitationMs =
+		hesitationLatencies.length > 0
+			? Math.round(hesitationLatencies.reduce((a, b) => a + b, 0) / hesitationLatencies.length)
+			: null;
 
-	// Weak Phonemes (< 75 GOP)
-	const phonemeBreakdown = Object.values(phonemeScoresMap).map((p) => ({
-		phoneme: p.phoneme,
-		type: p.type,
-		avgGop: Number((p.sumGop / p.total).toFixed(1)),
-		totalAttempts: p.total
-	})).sort((a, b) => a.avgGop - b.avgGop);
+	// Phoneme breakdown, sorted weakest first
+	const phonemeBreakdown = Object.values(phonemeScoresMap)
+		.map((p) => ({
+			phoneme: p.phoneme,
+			type: p.type,
+			avgGop: Number((p.sumGop / p.total).toFixed(1)),
+			totalAttempts: p.total
+		}))
+		.sort((a, b) => a.avgGop - b.avgGop);
 
-	// Frequent Substitutions list
-	const frequentSubstitutions = Object.values(substitutionsMap).map((s) => ({
-		target: s.target,
-		recognized: s.recognized,
-		type: s.type,
-		count: s.count,
-		avgGop: Number((s.totalGop / s.count).toFixed(1))
-	})).sort((a, b) => b.count - a.count).slice(0, 8);
+	const frequentSubstitutions = Object.values(substitutionsMap)
+		.map((s) => ({
+			target: s.target,
+			recognized: s.recognized,
+			type: s.type,
+			count: s.count,
+			avgGop: Number((s.totalGop / s.count).toFixed(1))
+		}))
+		.sort((a, b) => b.count - a.count)
+		.slice(0, 8);
 
-	// Format Tone Accuracy
-	const toneAccuracy = {
-		tone1: {
-			name: 'เสียง 1 (ราบสูง 55)',
-			accuracy: toneStats[1].total > 0 ? Math.round((toneStats[1].sumScore / toneStats[1].total)) : 92,
-			count: toneStats[1].total || 8,
-			isWeak: (toneStats[1].total > 0 && (toneStats[1].sumScore / toneStats[1].total) < 75)
-		},
-		tone2: {
-			name: 'เสียง 2 (เสียงขึ้น 35)',
-			accuracy: toneStats[2].total > 0 ? Math.round((toneStats[2].sumScore / toneStats[2].total)) : 85,
-			count: toneStats[2].total || 6,
-			isWeak: (toneStats[2].total > 0 && (toneStats[2].sumScore / toneStats[2].total) < 75)
-		},
-		tone3: {
-			name: 'เสียง 3 (ต่ำ-ขึ้น 214)',
-			accuracy: toneStats[3].total > 0 ? Math.round((toneStats[3].sumScore / toneStats[3].total)) : 64,
-			count: toneStats[3].total || 7,
-			isWeak: true
-		},
-		tone4: {
-			name: 'เสียง 4 (ตกฮวบ 51)',
-			accuracy: toneStats[4].total > 0 ? Math.round((toneStats[4].sumScore / toneStats[4].total)) : 88,
-			count: toneStats[4].total || 3,
-			isWeak: (toneStats[4].total > 0 && (toneStats[4].sumScore / toneStats[4].total) < 75)
-		}
-	};
+	// Tone accuracy (null when never attempted)
+	const toneAccuracy = Object.fromEntries(
+		([1, 2, 3, 4] as const).map((t) => {
+			const { total, sumScore } = toneStats[t];
+			const accuracy = total > 0 ? Math.round(sumScore / total) : null;
+			return [
+				`tone${t}`,
+				{
+					name: TONE_NAMES[t],
+					accuracy,
+					count: total,
+					isWeak: accuracy !== null && accuracy < 75
+				}
+			];
+		})
+	) as DiagnosticAnalytics['toneAccuracy'];
+
+	// Weak-point extraction for the remedial engine
+	const weakPhonemes = phonemeBreakdown.filter((p) => p.avgGop < 75).slice(0, 3).map((p) => p.phoneme);
+	const weakTones = ([1, 2, 3, 4] as const)
+		.filter((t) => toneStats[t].total > 0 && toneStats[t].sumScore / toneStats[t].total < 75)
+		.map((t) => t);
 
 	return {
-		totalAttempts: Math.max(totalAttempts, 24),
-		overallAccuracy,
-		avgPer,
-		avgToneScore,
+		hasData: totalAttempts > 0,
+		totalAttempts,
+		overallAccuracy: totalAttempts > 0 ? Number((totalGop / totalAttempts).toFixed(1)) : null,
+		avgPer: totalAttempts > 0 ? Number((totalPer / totalAttempts).toFixed(2)) : null,
+		avgToneScore: totalAttempts > 0 ? Number((totalTone / totalAttempts).toFixed(1)) : null,
 		toneAccuracy,
 		listeningImpact: {
 			withListeningAvgScore: withListeningAvg,
 			withoutListeningAvgScore: withoutListeningAvg,
-			scoreDelta: scoreDelta > 0 ? scoreDelta : 17.8
+			scoreDelta,
+			sampleWith: listenedScores.length,
+			sampleWithout: notListenedScores.length
 		},
-		hesitationStats: {
-			avgLatencyMs: avgHesitationMs,
-			sampleCount: hesitationCount || 18
-		},
+		hesitationStats: { avgLatencyMs: avgHesitationMs, sampleCount: hesitationLatencies.length },
 		phonemeBreakdown,
-		frequentSubstitutions: frequentSubstitutions.length > 0 ? frequentSubstitutions : [
-			{ target: 'zh', recognized: 'z', type: 'initial', count: 6, avgGop: 62.4 },
-			{ target: 'sh', recognized: 's', type: 'initial', count: 4, avgGop: 65.0 },
-			{ target: 'ch', recognized: 'c', type: 'initial', count: 3, avgGop: 59.8 }
-		]
+		frequentSubstitutions,
+		weakPhonemes,
+		weakTones
 	};
 }

@@ -6,6 +6,8 @@ import {
 	getLearningEvents,
 	getPronunciationEvaluations
 } from '$lib/server/db';
+import { generateRemedialVocab } from '$lib/analytics/remedialEngine';
+import { HSK1_VOCAB_PRESETS, HSK2_VOCAB_PRESETS, HSK3_VOCAB_PRESETS } from '$lib/vocabLoader';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -20,9 +22,18 @@ export const load: PageServerLoad = async ({ locals }) => {
 		getPronunciationEvaluations(userId, 20)
 	]);
 
+	const remedialCards = generateRemedialVocab(
+		diagnosticData
+			? { hasData: diagnosticData.hasData, weakPhonemes: diagnosticData.weakPhonemes, weakTones: diagnosticData.weakTones }
+			: null,
+		[...HSK1_VOCAB_PRESETS, ...HSK2_VOCAB_PRESETS, ...HSK3_VOCAB_PRESETS],
+		6
+	);
+
 	return {
 		user: locals.user || null,
 		diagnostic: diagnosticData,
+		remedialCards,
 		topMistakes,
 		recentMistakes,
 		mistakeStats,

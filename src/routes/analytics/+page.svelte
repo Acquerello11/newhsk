@@ -2,6 +2,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import AppHeader from '$lib/components/AppHeader.svelte';
+	import { selectArticulationGuides } from '$lib/analytics/articulationGuides';
 	import {
 		Activity,
 		Volume2,
@@ -23,46 +24,10 @@
 
 	let { data } = $props();
 
-	// Fallback/Default Diagnostic Stats if fresh user
-	const fallbackStats = {
-		totalAttempts: 24,
-		overallAccuracy: 82.4,
-		avgPer: 0.18,
-		avgToneScore: 84.5,
-		toneAccuracy: {
-			tone1: { name: 'เสียง 1 (ราบสูง 55)', accuracy: 92, count: 8, isWeak: false },
-			tone2: { name: 'เสียง 2 (เสียงขึ้น 35)', accuracy: 85, count: 6, isWeak: false },
-			tone3: { name: 'เสียง 3 (ต่ำ-ขึ้น 214)', accuracy: 64, count: 7, isWeak: true },
-			tone4: { name: 'เสียง 4 (ตกฮวบ 51)', accuracy: 88, count: 3, isWeak: false }
-		},
-		listeningImpact: {
-			withListeningAvgScore: 89.2,
-			withoutListeningAvgScore: 71.4,
-			scoreDelta: 17.8
-		},
-		hesitationStats: {
-			avgLatencyMs: 3250,
-			sampleCount: 18
-		},
-		phonemeBreakdown: [
-			{ phoneme: 'zh', type: 'initial', avgGop: 64.2, totalAttempts: 9 },
-			{ phoneme: 'i1', type: 'final_tone', avgGop: 91.0, totalAttempts: 12 },
-			{ phoneme: 'sh', type: 'initial', avgGop: 68.5, totalAttempts: 8 },
-			{ phoneme: 'i0', type: 'final_tone', avgGop: 89.0, totalAttempts: 10 },
-			{ phoneme: 'ch', type: 'initial', avgGop: 59.8, totalAttempts: 6 },
-			{ phoneme: 'a1', type: 'final_tone', avgGop: 94.0, totalAttempts: 14 },
-			{ phoneme: 'ou3', type: 'final_tone', avgGop: 66.5, totalAttempts: 7 },
-			{ phoneme: 'b', type: 'initial', avgGop: 96.0, totalAttempts: 15 }
-		],
-		frequentSubstitutions: [
-			{ target: 'zh', recognized: 'z', type: 'initial', count: 6, avgGop: 62.4 },
-			{ target: 'sh', recognized: 's', type: 'initial', count: 4, avgGop: 65.0 },
-			{ target: 'ch', recognized: 'c', type: 'initial', count: 3, avgGop: 59.8 }
-		]
-	};
-
-	const stats = $derived(data.diagnostic || fallbackStats);
+	const stats = $derived(data.diagnostic);
+	const hasData = $derived(stats?.hasData ?? false);
 	const learningEvents = $derived(data.learningEvents || []);
+	const remedialCards = $derived(data.remedialCards || []);
 
 	// Active tab for Pitch Contour interactive demo
 	let selectedToneTab = $state<1 | 2 | 3 | 4>(3);
@@ -70,64 +35,17 @@
 	let showRawXApiModal = $state(false);
 	let selectedStatement = $state<any>(null);
 
-	// Recommended remedial words based on weak points (Tone 3 and Retroflex zh/ch/sh)
-	const remedialRecommendations = $derived([
-		{
-			hanzi: '你好',
-			pinyin: 'nǐ hǎo',
-			thai: 'สวัสดี',
-			reason: 'ฝึกกดระดับเสียงต่ำของเสียงที่ 3 และกฎเปลี่ยนเสียง 3+3 (Tone Sandhi)',
-			tag: 'เสียงที่ 3 (214)',
-			presetId: 'sandhi_nihao'
-		},
-		{
-			hanzi: '知识',
-			pinyin: 'zhī shi',
-			thai: 'ความรู้',
-			reason: 'แก้ออกเสียงสับสนเสียงม้วนลิ้น /zh/ สลับเป็น /z/',
-			tag: 'พยัญชนะ /zh/',
-			presetId: 't1_zhi'
-		},
-		{
-			hanzi: '水',
-			pinyin: 'shuǐ',
-			thai: 'น้ำ',
-			reason: 'ฝึกออกเสียงพยัญชนะเสียดแทรกม้วนลิ้น /sh/ ร่วมกับเสียง 3',
-			tag: 'พยัญชนะ /sh/ + เสียง 3',
-			presetId: 't3_shui'
-		},
-		{
-			hanzi: '吃',
-			pinyin: 'chī',
-			thai: 'กิน',
-			reason: 'ฝึกพ่นลมพร้อมม้วนลิ้น /ch/ เทียบกับ /c/',
-			tag: 'พยัญชนะ /ch/',
-			presetId: 't1_chi'
-		},
-		{
-			hanzi: '手表',
-			pinyin: 'shǒu biǎo',
-			thai: 'นาฬิกาข้อมือ',
-			reason: 'ฝึกเสียงม้วนลิ้น /sh/ ร่วมกับกฎเปลี่ยนเสียง 3+3',
-			tag: 'กฎ 3+3 Sandhi',
-			presetId: 'sandhi_shoubiao'
-		},
-		{
-			hanzi: '可以',
-			pinyin: 'kě yǐ',
-			thai: 'สามารถ / ได้',
-			reason: 'ฝึกคุมระดับเสียงต่ำ (Level 21) ของวรรณยุกต์ 3',
-			tag: 'เสียงที่ 3 (214)',
-			presetId: 't3_keyi'
-		}
-	]);
-
 	// Filtered phoneme details
 	const filteredPhonemes = $derived(
-		(stats.phonemeBreakdown || []).filter((p) => {
+		(stats?.phonemeBreakdown || []).filter((p) => {
 			if (activePhonemeFilter === 'all') return true;
 			return p.type === activePhonemeFilter;
 		})
+	);
+
+	// Articulatory guidance boxes selected from actually-detected weak points
+	const articulationGuides = $derived(
+		selectArticulationGuides(stats?.weakPhonemes ?? [], stats?.weakTones ?? [])
 	);
 
 	function getScoreColor(score: number): { bg: string; text: string; border: string; label: string } {
@@ -195,63 +113,102 @@
 	</div>
 
 	<!-- 2. EXECUTIVE KPI METRICS (LQ5 & LQ6 READY) -->
-	<div class="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
-		<!-- Overall GOP -->
-		<div class="rounded-2xl border bg-card p-4 sm:p-5 shadow-sm space-y-1">
-			<div class="flex items-center justify-between text-xs font-medium text-muted-foreground">
-				<span>คะแนนเฉลี่ยรวม (GOP)</span>
-				<Activity class="size-4 text-emerald-600" />
-			</div>
-			<div class="text-3xl font-black text-emerald-600 dark:text-emerald-400">
-				{stats.overallAccuracy}%
-			</div>
-			<div class="text-[11px] text-muted-foreground">
-				เกณฑ์มาตรฐาน HSK 1 (Goodness of Pronunciation)
-			</div>
+	{#snippet emptyState(message: string)}
+		<div class="rounded-2xl border border-dashed p-6 text-center space-y-3">
+			<p class="text-sm text-muted-foreground">{message}</p>
+			<a
+				href="/pitch"
+				class="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground shadow transition hover:opacity-90"
+			>
+				<span>เริ่มฝึกออกเสียง</span>
+				<ArrowRight class="size-3.5" />
+			</a>
 		</div>
+	{/snippet}
 
-		<!-- Phoneme Error Rate (PER) -->
-		<div class="rounded-2xl border bg-card p-4 sm:p-5 shadow-sm space-y-1">
-			<div class="flex items-center justify-between text-xs font-medium text-muted-foreground">
-				<span>อัตราความผิดพลาด (PER)</span>
-				<AlertTriangle class="size-4 text-amber-600" />
+	{#if !stats || !stats.hasData}
+		<div class="rounded-3xl border bg-card p-5 sm:p-6 shadow-sm">
+			<div class="flex items-center gap-2 mb-3">
+				<Info class="size-4 text-primary" />
+				<h2 class="text-base font-black text-foreground">ยังไม่มีข้อมูลการฝึก</h2>
 			</div>
-			<div class="text-3xl font-black text-amber-600 dark:text-amber-400">
-				{stats.avgPer ?? 0.18}
-			</div>
-			<div class="text-[11px] text-muted-foreground">
-				Phoneme Error Rate $(S+D+I)/N$
-			</div>
+			{@render emptyState('สถิติทั้งหมดในหน้านี้จะคำนวณจากผลการฝึกออกเสียงจริงของคุณ เริ่มฝึกในห้องฝึกพูดสักไม่กี่คำ แล้วกลับมาที่หน้านี้เพื่อดูผลวินิจฉัย')}
 		</div>
+	{:else}
+		<div class="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
+			<!-- Overall GOP -->
+			<div class="rounded-2xl border bg-card p-4 sm:p-5 shadow-sm space-y-1">
+				<div class="flex items-center justify-between text-xs font-medium text-muted-foreground">
+					<span>คะแนนเฉลี่ยรวม (GOP)</span>
+					<Activity class="size-4 text-emerald-600" />
+				</div>
+				<div class="text-3xl font-black text-emerald-600 dark:text-emerald-400">
+					{stats.overallAccuracy}%
+				</div>
+				<div class="text-[11px] text-muted-foreground">
+					จากการฝึกจริง {stats.totalAttempts} ครั้ง (Goodness of Pronunciation)
+				</div>
+			</div>
 
-		<!-- LQ5: Example Listening Impact -->
-		<div class="rounded-2xl border bg-card p-4 sm:p-5 shadow-sm space-y-1">
-			<div class="flex items-center justify-between text-xs font-medium text-muted-foreground">
-				<span>ผลการฟังเสียงตัวอย่าง (LQ5)</span>
-				<Volume2 class="size-4 text-sky-600" />
+			<!-- Phoneme Error Rate (PER) -->
+			<div class="rounded-2xl border bg-card p-4 sm:p-5 shadow-sm space-y-1">
+				<div class="flex items-center justify-between text-xs font-medium text-muted-foreground">
+					<span>อัตราความผิดพลาด (PER)</span>
+					<AlertTriangle class="size-4 text-amber-600" />
+				</div>
+				<div class="text-3xl font-black text-amber-600 dark:text-amber-400">
+					{stats.avgPer ?? '-'}
+				</div>
+				<div class="text-[11px] text-muted-foreground">
+					Phoneme Error Rate $(S+D+I)/N$
+				</div>
 			</div>
-			<div class="text-3xl font-black text-sky-600 dark:text-sky-400">
-				+{stats.listeningImpact?.scoreDelta ?? 17.8}
-			</div>
-			<div class="text-[11px] text-muted-foreground">
-				คะแนนเพิ่มขึ้นเฉลี่ยเมื่อกดฟังเสียงต้นแบบก่อนพูด
-			</div>
-		</div>
 
-		<!-- LQ6: Hesitation Latency -->
-		<div class="rounded-2xl border bg-card p-4 sm:p-5 shadow-sm space-y-1">
-			<div class="flex items-center justify-between text-xs font-medium text-muted-foreground">
-				<span>ความลังเลก่อนพูด (LQ6)</span>
-				<Clock class="size-4 text-violet-600" />
+			<!-- LQ5: Example Listening Impact -->
+			<div class="rounded-2xl border bg-card p-4 sm:p-5 shadow-sm space-y-1">
+				<div class="flex items-center justify-between text-xs font-medium text-muted-foreground">
+					<span>ผลการฟังเสียงตัวอย่าง (LQ5)</span>
+					<Volume2 class="size-4 text-sky-600" />
+				</div>
+				<div class="text-3xl font-black text-sky-600 dark:text-sky-400">
+					{#if stats.listeningImpact?.scoreDelta !== null && stats.listeningImpact?.scoreDelta !== undefined}
+						{stats.listeningImpact.scoreDelta > 0 ? '+' : ''}{stats.listeningImpact.scoreDelta}
+					{:else}
+						-
+					{/if}
+				</div>
+				<div class="text-[11px] text-muted-foreground">
+					{#if stats.listeningImpact?.sampleWith || stats.listeningImpact?.sampleWithout}
+						เทียบ {stats.listeningImpact.sampleWith} ครั้ง (มีการฟัง) vs {stats.listeningImpact.sampleWithout} ครั้ง (ไม่ฟัง)
+					{:else}
+						คะแนนเฉลี่ยเมื่อกดฟังเสียงต้นแบบก่อนพูด (รอข้อมูลเพียงพอ)
+					{/if}
+				</div>
 			</div>
-			<div class="text-3xl font-black text-violet-600 dark:text-violet-400">
-				{((stats.hesitationStats?.avgLatencyMs ?? 3250) / 1000).toFixed(1)}s
-			</div>
-			<div class="text-[11px] text-muted-foreground">
-				Hesitation Latency เฉลี่ยก่อนกดเริ่มบันทึกเสียง
+
+			<!-- LQ6: Hesitation Latency -->
+			<div class="rounded-2xl border bg-card p-4 sm:p-5 shadow-sm space-y-1">
+				<div class="flex items-center justify-between text-xs font-medium text-muted-foreground">
+					<span>ความลังเลก่อนพูด (LQ6)</span>
+					<Clock class="size-4 text-violet-600" />
+				</div>
+				<div class="text-3xl font-black text-violet-600 dark:text-violet-400">
+					{#if stats.hesitationStats?.avgLatencyMs !== null && stats.hesitationStats?.avgLatencyMs !== undefined}
+						{(stats.hesitationStats.avgLatencyMs / 1000).toFixed(1)}s
+					{:else}
+						-
+					{/if}
+				</div>
+				<div class="text-[11px] text-muted-foreground">
+					{#if stats.hesitationStats?.sampleCount}
+						Hesitation Latency เฉลี่ย ({stats.hesitationStats.sampleCount} ครั้ง)
+					{:else}
+						Hesitation Latency ก่อนกดเริ่มบันทึกเสียง (รอข้อมูล)
+					{/if}
+				</div>
 			</div>
 		</div>
-	</div>
+	{/if}
 
 	<!-- 3. PHONETIC BREAKDOWN SECTION (รายหน่วยเสียง Initial / Final+Tone) -->
 	<section class="rounded-3xl border bg-card p-5 sm:p-6 shadow-sm space-y-5">
@@ -298,6 +255,9 @@
 		</div>
 
 		<!-- Phoneme Badge Grid -->
+		{#if filteredPhonemes.length === 0}
+			{@render emptyState('ยังไม่มีข้อมูลรายหน่วยเสียง — ฝึกออกเสียงผ่านห้องฝึกพูดเพื่อเก็บสถิติรายพยัญชนะ/สระ')}
+		{:else}
 		<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
 			{#each filteredPhonemes as item (item.phoneme)}
 				{@const style = getScoreColor(item.avgGop)}
@@ -327,7 +287,7 @@
 		</div>
 
 		<!-- Frequent Substitution Analysis Alert -->
-		{#if stats.frequentSubstitutions && stats.frequentSubstitutions.length > 0}
+		{#if stats?.frequentSubstitutions && stats.frequentSubstitutions.length > 0}
 			<div class="rounded-2xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/60 dark:bg-rose-950/30 p-4 space-y-2">
 				<div class="flex items-center gap-2 text-rose-800 dark:text-rose-200 font-bold text-sm">
 					<AlertTriangle class="size-4 text-rose-600" />
@@ -342,10 +302,11 @@
 							<span class="text-[10px] text-muted-foreground">({sub.count} ครั้ง · GOP {sub.avgGop})</span>
 						</div>
 					{/each}
+					</div>
 				</div>
-			</div>
-		{/if}
-	</section>
+			{/if}
+			{/if}
+		</section>
 
 	<!-- 4. F0 PITCH CONTOUR COMPARISON (กราฟเปรียบเทียบระดับเสียงวรรณยุกต์ 4 เสียง) -->
 	<section class="rounded-3xl border bg-card p-5 sm:p-6 shadow-sm space-y-5">
@@ -423,10 +384,14 @@
 				</div>
 
 				<div class="text-xs text-slate-400 text-center">
-					{#if selectedToneTab === 3}
-						<span class="text-rose-400 font-semibold">⚠️ ตรวจพบจุดเบี่ยงเบน:</span> ระดับเสียงต่ำยังไม่ลงลึกถึงระดับ 1 (เกิดการตัดเสียงสั้นคล้ายเสียง 2)
+					{#if !stats || !stats.hasData}
+						<span class="text-slate-400 font-medium">ℹ️ แสดงเส้นมาตรฐานเจ้าของภาษา (Chao Scale) — ยังไม่มีข้อมูลเส้น F0 ของผู้เรียน</span>
+					{:else if stats.toneAccuracy[`tone${selectedToneTab}`]?.isWeak}
+						<span class="text-rose-400 font-semibold">⚠️ ตรวจพบจุดเบี่ยงเบน:</span> ความแม่นยำของเสียงนี้ต่ำกว่าเกณฑ์ 75% ({stats.toneAccuracy[`tone${selectedToneTab}`]?.accuracy}%)
+					{:else if stats.toneAccuracy[`tone${selectedToneTab}`]?.accuracy !== null}
+						<span class="text-emerald-400 font-semibold">✅ แม่นยำ:</span> ความแม่นยำ {stats.toneAccuracy[`tone${selectedToneTab}`]?.accuracy}% สอดคล้องกับมาตรฐาน
 					{:else}
-						<span class="text-emerald-400 font-semibold">✅ แม่นยำ:</span> เส้นระดับเสียง F0 สอดคล้องกับเส้นเป้าหมาย
+						<span class="text-slate-400 font-medium">ยังไม่เคยฝึกเสียงนี้ในระบบ</span>
 					{/if}
 				</div>
 			</div>
@@ -434,22 +399,39 @@
 			<!-- Tone Accuracy Breakdown Bars -->
 			<div class="space-y-3">
 				<h3 class="text-sm font-bold text-foreground">ความแม่นยำแยกตามวรรณยุกต์:</h3>
-				{#each Object.entries(stats.toneAccuracy) as [k, t]}
-					<div class="space-y-1">
-						<div class="flex justify-between text-xs">
-							<span class="font-medium {t.isWeak ? 'text-rose-600 dark:text-rose-400 font-bold' : 'text-foreground'}">
-								{t.name} {t.isWeak ? '⚠️ (ควรฝึกเพิ่ม)' : ''}
-							</span>
-							<span class="font-mono font-bold text-foreground">{t.accuracy}%</span>
-						</div>
-						<div class="h-2 w-full rounded-full bg-muted overflow-hidden">
-							<div
-								class="h-full rounded-full transition-all {t.accuracy >= 80 ? 'bg-emerald-500' : t.accuracy >= 70 ? 'bg-amber-500' : 'bg-rose-500'}"
-								style="width: {t.accuracy}%"
-							></div>
-						</div>
+				{#if !stats || !stats.hasData}
+					<div class="rounded-2xl border border-dashed p-4 text-center space-y-2">
+						<p class="text-xs text-muted-foreground">ยังไม่มีข้อมูลความแม่นยำวรรณยุกต์จากการฝึกจริง</p>
+						<a
+							href="/pitch"
+							class="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground shadow transition hover:opacity-90"
+						>
+							<span>เริ่มฝึกเสียง</span>
+							<ArrowRight class="size-3.5" />
+						</a>
 					</div>
-				{/each}
+				{:else}
+					{#each Object.values(stats.toneAccuracy) as t}
+						<div class="space-y-1">
+							<div class="flex justify-between text-xs">
+								<span class="font-medium {t.isWeak ? 'text-rose-600 dark:text-rose-400 font-bold' : 'text-foreground'}">
+									{t.name} {t.isWeak ? '⚠️ (ควรฝึกเพิ่ม)' : ''}
+								</span>
+								<span class="font-mono font-bold text-foreground">{t.accuracy !== null ? `${t.accuracy}%` : 'ไม่มีข้อมูล'}</span>
+							</div>
+							{#if t.accuracy !== null}
+								<div class="h-2 w-full rounded-full bg-muted overflow-hidden">
+									<div
+										class="h-full rounded-full transition-all {t.accuracy >= 80 ? 'bg-emerald-500' : t.accuracy >= 70 ? 'bg-amber-500' : 'bg-rose-500'}"
+										style="width: {t.accuracy}%"
+									></div>
+								</div>
+							{:else}
+								<div class="h-2 w-full rounded-full bg-muted"></div>
+							{/if}
+						</div>
+					{/each}
+				{/if}
 			</div>
 		</div>
 	</section>
@@ -460,39 +442,29 @@
 			<span>👅 กล่องวินิจฉัยจุดบกพร่อง & คำแนะนำสรีรศาสตร์การออกเสียง (Articulatory Guidance)</span>
 		</h2>
 
-		<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-			<!-- Insight 1: Retroflex Initial Consonant -->
-			<div class="rounded-2xl border border-sky-200 dark:border-sky-900/50 bg-sky-50/50 dark:bg-sky-950/20 p-4 space-y-2">
-				<div class="flex items-center gap-2 text-sky-900 dark:text-sky-200 font-bold text-sm">
-					<Sparkles class="size-4 text-sky-600" />
-					<span>การออกเสียงพยัญชนะม้วนลิ้น (/zh/, /ch/, /sh/ vs /z/, /c/, /s/)</span>
+		{#if !stats || !stats.hasData}
+			{@render emptyState('ยังไม่มีข้อมูลการฝึก — ฝึกออกเสียงในห้องฝึกพูดเพื่อรับคำแนะนำการวางรูปปากและตำแหน่งลิ้นตามจุดบกพร่องจริง')}
+		{:else}
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+			{#each articulationGuides as guide, i}
+				<div class="rounded-2xl border {i === 0 ? 'border-sky-200 dark:border-sky-900/50 bg-sky-50/50 dark:bg-sky-950/20' : 'border-amber-200 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/20'} p-4 space-y-2">
+					<div class="flex items-center gap-2 {i === 0 ? 'text-sky-900 dark:text-sky-200' : 'text-amber-900 dark:text-amber-200'} font-bold text-sm">
+						<Sparkles class="size-4 {i === 0 ? 'text-sky-600' : 'text-amber-600'}" />
+						<span>{guide.title}</span>
+					</div>
+					<p class="text-xs {i === 0 ? 'text-sky-900/80 dark:text-sky-200/80' : 'text-amber-900/80 dark:text-amber-200/80'} leading-relaxed">
+						<strong>จุดบกพร่องที่พบ:</strong> {guide.observed}
+					</p>
+					<div class="rounded-xl bg-background/80 p-2.5 text-xs text-foreground space-y-1 border">
+						<div class="font-bold {i === 0 ? 'text-primary' : 'text-amber-600 dark:text-amber-400'}">💡 วิธีแก้ไข:</div>
+						{#each guide.fixes as fix, j}
+							<div>{j + 1}. {fix}</div>
+						{/each}
+					</div>
 				</div>
-				<p class="text-xs text-sky-900/80 dark:text-sky-200/80 leading-relaxed">
-					<strong>จุดบกพร่องที่พบ:</strong> ผู้เรียนมีแนวโน้มใช้ปลายลิ้นแตะหลังฟันบน (Dental Sibilant /z/) แทนการยกปลายลิ้นงอขึ้นแตะเพดานแข็งด้านหลังปุ่มเหงือก (Retroflex /zh/)
-				</p>
-				<div class="rounded-xl bg-background/80 p-2.5 text-xs text-foreground space-y-1 border">
-					<div class="font-bold text-primary">💡 วิธีแก้ไขการวางรูปปาก:</div>
-					<div>1. ยกปลายลิ้นขึ้นด้านบนแล้วงอถอยหลังเล็กน้อยแตะเพดานแข็ง</div>
-					<div>2. กักลมไว้ชั่วครู่แล้วคลายลิ้นออกเล็กน้อยให้ลมเสียดแทรก (ห้ามแตะฟันหน้า)</div>
-				</div>
+			{/each}
 			</div>
-
-			<!-- Insight 2: Tone 3 Low Dipping -->
-			<div class="rounded-2xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/20 p-4 space-y-2">
-				<div class="flex items-center gap-2 text-amber-900 dark:text-amber-200 font-bold text-sm">
-					<Sparkles class="size-4 text-amber-600" />
-					<span>การออกเสียงวรรณยุกต์เสียงที่ 3 (214 Low Dipping)</span>
-				</div>
-				<p class="text-xs text-amber-900/80 dark:text-amber-200/80 leading-relaxed">
-					<strong>จุดบกพร่องที่พบ:</strong> ผู้เรียนกดระดับเสียงลงไม่ลึกพอ ทำให้ระดับเสียงกลายเป็นเสียงราบกลาง (33) หรือสับสนกับเสียงที่ 2 (35)
-				</p>
-				<div class="rounded-xl bg-background/80 p-2.5 text-xs text-foreground space-y-1 border">
-					<div class="font-bold text-amber-600 dark:text-amber-400">💡 วิธีแก้ไขการปรับเส้นเสียง:</div>
-					<div>1. เริ่มต้นที่ระดับเสียงกึ่งต่ำ (ระดับ 2) แล้วกดระดับเสียงลงต่ำสุดที่ลำคอ (ระดับ 1)</div>
-					<div>2. หากเป็นคำโดดหรือท้ายประโยค ให้ตวัดระดับเสียงขึ้นสู่ระดับ 4</div>
-				</div>
-			</div>
-		</div>
+		{/if}
 	</section>
 
 	<!-- 6. ADAPTIVE REMEDIAL RECOMMENDATIONS (ชุดคำศัพท์ฝึกซ่อมเสริมเฉพาะบุคคล) -->
@@ -508,8 +480,11 @@
 			</div>
 		</div>
 
+		{#if remedialCards.length === 0}
+			{@render emptyState('ระบบจะแนะนำคำศัพท์เฉพาะบุคคลเมื่อมีข้อมูลจุดอ่อนจากการฝึกจริงแล้ว')}
+		{:else}
 		<div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5">
-			{#each remedialRecommendations as rec}
+			{#each remedialCards as rec}
 				<div class="rounded-2xl border bg-background p-4 shadow-sm flex flex-col justify-between space-y-3 hover:border-primary transition group">
 					<div>
 						<div class="flex items-center justify-between">
@@ -532,7 +507,7 @@
 					</div>
 
 					<a
-						href="/pitch"
+						href="/pitch?word={encodeURIComponent(rec.hanzi)}"
 						class="flex items-center justify-center gap-1.5 w-full rounded-xl bg-muted hover:bg-primary hover:text-primary-foreground py-2 text-xs font-bold transition active:scale-95 text-foreground"
 					>
 						<span>ฝึกคำนี้ทันที</span>
@@ -541,6 +516,7 @@
 				</div>
 			{/each}
 		</div>
+		{/if}
 	</section>
 
 	<!-- 7. xAPI TELEMETRY & PDPA AUDIT LOGS INSPECTOR -->

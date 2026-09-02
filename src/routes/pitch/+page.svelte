@@ -26,7 +26,9 @@
 		type SyllableInfo
 	} from '$lib/pitch';
 	import {
-		HSK1_VOCAB_PRESETS
+		HSK1_VOCAB_PRESETS,
+		HSK2_VOCAB_PRESETS,
+		HSK3_VOCAB_PRESETS
 	} from '$lib/vocabLoader';
 	import {
 		initToneNeuralNetwork,
@@ -122,6 +124,27 @@
 		loadStats();
 		if (HSK1_VOCAB_PRESETS.length > 0) {
 			selectedPreset = HSK1_VOCAB_PRESETS[0];
+		}
+		// Preselect a word when arriving from the analytics dashboard (/pitch?word=...)
+		if (browser) {
+			const requestedWord = new URLSearchParams(window.location.search).get('word');
+			if (requestedWord) {
+				const allVocab = [...HSK1_VOCAB_PRESETS, ...HSK2_VOCAB_PRESETS, ...HSK3_VOCAB_PRESETS];
+				const match = allVocab.find((p) => p.hanzi === requestedWord);
+				if (match) {
+					selectedPreset = match;
+					if (!vocabList.some((p) => p.id === match.id)) {
+						vocabList = allVocab;
+					}
+					// Smooth scroll to the target practice card
+					setTimeout(() => {
+						const targetCard = document.getElementById('target-practice-card');
+						if (targetCard) {
+							targetCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+						}
+					}, 200);
+				}
+			}
 		}
 		// Warm up the 1D-CNN + Bi-LSTM ONNX AI model in the background
 		initToneNeuralNetwork().catch(() => {});
