@@ -317,6 +317,38 @@
 			</div>
 		</section>
 
+		<!-- 6. ความแม่นยำรายพยัญชนะต้น (เฉพาะพยัญชนะต้นจริง /b/, /d/, /zh/, /sh/) -->
+		{#if stats.phonemeBreakdown && stats.phonemeBreakdown.length > 0}
+			<section class="rounded-3xl border bg-card p-5 space-y-3 shadow-sm">
+				<div class="flex items-center justify-between border-b pb-3">
+					<div>
+						<h2 class="text-base font-bold text-foreground">ความแม่นยำรายพยัญชนะต้น</h2>
+						<p class="text-[11px] text-muted-foreground">คะแนนความชัดเจนของพยัญชนะ (Shengmu) ที่ตรวจพบจากการฝึกจริง</p>
+					</div>
+					<span class="text-xs text-muted-foreground font-medium">
+						{stats.phonemeBreakdown.length} พยัญชนะ
+					</span>
+				</div>
+
+				<div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5">
+					{#each stats.phonemeBreakdown as item (item.phoneme)}
+						{@const isGood = item.avgGop >= 80}
+						{@const isFair = item.avgGop >= 60}
+						<div class="rounded-xl border p-2.5 text-center space-y-1 bg-background">
+							<div class="font-mono text-base font-black text-foreground">
+								/{item.phoneme}/
+							</div>
+							<div class="text-xs font-bold {isGood ? 'text-emerald-600 dark:text-emerald-400' : isFair ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}">
+								{item.avgGop}
+							</div>
+							<div class="text-[10px] text-muted-foreground">
+								{item.totalAttempts} ครั้ง
+							</div>
+						</div>
+					{/each}
+				</div>
+			</section>
+		{/if}
 	{/if}
 
 	<!-- 7. RESEARCH & AUDIT LOGS (Collapsible for Clean Minimalism) -->

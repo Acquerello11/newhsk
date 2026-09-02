@@ -70,6 +70,10 @@ export async function recordPhonemesToNeon(params: {
 
 		if (params.phonemeDetails && params.phonemeDetails.length > 0) {
 			for (const p of params.phonemeDetails) {
+				// แบบที่ 3: กรองตัดพวกโค้ดที่เกิดจากบั๊กตัดพยางค์ทิ้ง
+				if (p.phoneme.length > 5 || p.phoneme.startsWith('a') && p.phoneme.length > 3) {
+					continue;
+				}
 				await sql`
 					INSERT INTO phoneme_evaluations (
 						user_id, word_id, pinyin, phoneme, phoneme_type, gop, status, target, recognized, created_at

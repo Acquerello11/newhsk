@@ -867,6 +867,13 @@ export async function getDiagnosticAnalytics(userId: string): Promise<Diagnostic
 		4: { total: 0, sumScore: 0 }
 	};
 
+	const VALID_INITIALS = new Set([
+		'b', 'p', 'm', 'f', 'd', 't', 'n', 'l',
+		'g', 'k', 'h', 'j', 'q', 'x',
+		'zh', 'ch', 'sh', 'r', 'z', 'c', 's',
+		'y', 'w'
+	]);
+
 	const substitutionsMap: Record<string, { target: string; recognized: string; type: string; count: number; totalGop: number }> = {};
 	const phonemeScoresMap: Record<string, { phoneme: string; type: string; total: number; sumGop: number }> = {};
 
@@ -883,29 +890,38 @@ export async function getDiagnosticAnalytics(userId: string): Promise<Diagnostic
 			const pName = p.phoneme || p.target;
 			if (!pName) continue;
 
-			// Phoneme breakdown aggregation
-			if (!phonemeScoresMap[pName]) {
-				phonemeScoresMap[pName] = { phoneme: pName, type: p.type || 'phoneme', total: 0, sumGop: 0 };
-			}
-			phonemeScoresMap[pName].total++;
-			phonemeScoresMap[pName].sumGop += Number(p.gop ?? 0);
-
-			// Substitution errors
-			if (p.status === 'substitution' && p.target && p.recognized && p.target !== p.recognized) {
-				const key = `${p.target}->${p.recognized}`;
-				if (!substitutionsMap[key]) {
-					substitutionsMap[key] = { target: p.target, recognized: p.recognized, type: p.type, count: 0, totalGop: 0 };
-				}
-				substitutionsMap[key].count++;
-				substitutionsMap[key].totalGop += Number(p.gop ?? 0);
-			}
-
 			// Tone stats from final_tone or syllable
 			if (p.type === 'final_tone' || p.targetTone) {
 				const toneNum = Number(p.targetTone || p.phoneme?.slice(-1));
 				if (toneNum >= 1 && toneNum <= 4) {
 					toneStats[toneNum].total++;
 					toneStats[toneNum].sumScore += Number(p.gop ?? 0);
+				}
+			}
+
+			//แบบที่ 3: กรองแสดงเฉพาะพยัญชนะต้นจริง (เช่น /b/, /d/, /zh/, /sh/)
+			// ตัดพวกสระโค้ดตัวเลขทิ้งไปให้หมด
+			const cleanInitial = pName.toLowerCase().replace(/[^a-z]/g, '');
+			if (VALID_INITIALS.has(cleanInitial)) {
+				// Phoneme breakdown aggregation (เฉพาะพยัญชนะต้นจริง)
+				if (!phonemeScoresMap[cleanInitial]) {
+					phonemeScoresMap[cleanInitial] = { phoneme: cleanInitial, type: 'initial', total: 0, sumGop: 0 };
+				}
+				phonemeScoresMap[cleanInitial].total++;
+				phonemeScoresMap[cleanInitial].sumGop += Number(p.gop ?? 0);
+
+				// Substitution errors
+				if (p.status === 'substitution' && p.target && p.recognized && p.target !== p.recognized) {
+					const cleanTarget = p.target.toLowerCase().replace(/[^a-z]/g, '');
+					const cleanRecognized = p.recognized.toLowerCase().replace(/[^a-z]/g, '');
+					if (VALID_INITIALS.has(cleanTarget) && VALID_INITIALS.has(cleanRecognized)) {
+						const key = `${cleanTarget}->${cleanRecognized}`;
+						if (!substitutionsMap[key]) {
+							substitutionsMap[key] = { target: cleanTarget, recognized: cleanRecognized, type: 'initial', count: 0, totalGop: 0 };
+						}
+						substitutionsMap[key].count++;
+						substitutionsMap[key].totalGop += Number(p.gop ?? 0);
+					}
 				}
 			}
 		}
