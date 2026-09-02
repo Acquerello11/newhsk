@@ -5,7 +5,6 @@
 	import {
 		Activity,
 		Volume2,
-		Clock,
 		Sparkles,
 		AlertTriangle,
 		ArrowRight,
@@ -114,8 +113,8 @@
 			</a>
 		</div>
 	{:else}
-		<!-- 4 STAT CARDS (Minimal Metric Cards) -->
-		<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+		<!-- 3 STAT CARDS (Minimal Metric Cards) -->
+		<div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
 			<!-- Overall Accuracy -->
 			<div class="rounded-2xl border bg-card p-4 space-y-1 shadow-sm">
 				<div class="flex items-center justify-between text-xs text-muted-foreground font-medium">
@@ -159,24 +158,6 @@
 				</div>
 				<div class="text-[11px] text-muted-foreground">
 					คะแนนเพิ่มขึ้นเมื่อกดฟังก่อนพูด
-				</div>
-			</div>
-
-			<!-- Hesitation Time -->
-			<div class="rounded-2xl border bg-card p-4 space-y-1 shadow-sm">
-				<div class="flex items-center justify-between text-xs text-muted-foreground font-medium">
-					<span>เวลาตอบสนอง</span>
-					<Clock class="size-3.5 text-violet-600" />
-				</div>
-				<div class="text-2xl sm:text-3xl font-black text-violet-600 dark:text-violet-400">
-					{#if stats.hesitationStats?.avgLatencyMs !== null && stats.hesitationStats?.avgLatencyMs !== undefined}
-						{(stats.hesitationStats.avgLatencyMs / 1000).toFixed(1)}s
-					{:else}
-						-
-					{/if}
-				</div>
-				<div class="text-[11px] text-muted-foreground">
-					ความเร็วเฉลี่ยก่อนเริ่มพูด
 				</div>
 			</div>
 		</div>
