@@ -8,8 +8,6 @@
 		Sparkles,
 		AlertTriangle,
 		ArrowRight,
-		FileText,
-		ChevronDown,
 		CheckCircle2,
 		Info,
 		Zap
@@ -19,22 +17,14 @@
 
 	const stats = $derived(data.diagnostic);
 	const hasData = $derived(stats?.hasData ?? false);
-	const learningEvents = $derived(data.learningEvents || []);
 	const remedialCards = $derived(data.remedialCards || []);
 
 	// Active tab for Pitch Contour demo
 	let selectedToneTab = $state<1 | 2 | 3 | 4>(3);
-	let showRawXApiModal = $state(false);
-	let selectedStatement = $state<any>(null);
 	// Articulatory guidance boxes selected from actually-detected weak points
 	const articulationGuides = $derived(
 		selectArticulationGuides(stats?.weakPhonemes ?? [], stats?.weakTones ?? [])
 	);
-
-	function viewXApiStatement(ev: any) {
-		selectedStatement = ev.xapiStatement;
-		showRawXApiModal = true;
-	}
 </script>
 
 <AppHeader showBack backHref="/" />
@@ -351,109 +341,5 @@
 		{/if}
 	{/if}
 
-	<!-- 7. RESEARCH & AUDIT LOGS (Collapsible for Clean Minimalism) -->
-	<details class="group rounded-2xl border bg-card/40 p-4 transition text-xs">
-		<summary class="cursor-pointer font-semibold text-muted-foreground flex items-center justify-between hover:text-foreground list-none">
-			<span class="flex items-center gap-2">
-				<FileText class="size-3.5 text-primary" />
-				<span>บันทึกกิจกรรม xAPI (IEEE 9274.1.1 Logs — {learningEvents.length} รายการ)</span>
-			</span>
-			<ChevronDown class="size-4 transition-transform group-open:rotate-180 text-muted-foreground" />
-		</summary>
-
-		<div class="pt-4 space-y-3">
-			<p class="text-[11px] text-muted-foreground">
-				บันทึกตามมาตรฐาน xAPI โดยไม่มีการจัดเก็บไฟล์เสียงดิบ (Zero Audio Storage at Rest)
-			</p>
-
-			{#if learningEvents.length === 0}
-				<div class="rounded-xl border border-dashed p-4 text-center text-[11px] text-muted-foreground">
-					ยังไม่มีประวัติกิจกรรม xAPI
-				</div>
-			{:else}
-				<div class="overflow-x-auto rounded-xl border">
-					<table class="w-full text-left text-[11px]">
-						<thead class="bg-muted/50 border-b text-muted-foreground font-semibold">
-							<tr>
-								<th class="p-2.5">เวลา</th>
-								<th class="p-2.5">กิจกรรม</th>
-								<th class="p-2.5">คำศัพท์</th>
-								<th class="p-2.5">ผลลัพธ์</th>
-								<th class="p-2.5 text-right">Statement</th>
-							</tr>
-						</thead>
-						<tbody class="divide-y">
-							{#each learningEvents as ev}
-								<tr class="hover:bg-muted/20">
-									<td class="p-2.5 font-mono text-muted-foreground">
-										{new Date(ev.createdAt).toLocaleTimeString('th-TH')}
-									</td>
-									<td class="p-2.5 font-medium">
-										{ev.eventType}
-									</td>
-									<td class="p-2.5 font-bold text-foreground">
-										{ev.wordId}
-									</td>
-									<td class="p-2.5 text-muted-foreground">
-										{#if ev.eventType === 'pronounced'}
-											GOP: {ev.xapiStatement?.result?.score?.raw ?? '-'}
-										{:else if ev.eventType === 'listened_to_example'}
-											ฟัง {ev.xapiStatement?.result?.extensions?.['https://hsk.app/xapi/ext/listen-count'] ?? 1} ครั้ง
-										{:else if ev.eventType === 'hesitated'}
-											{ev.xapiStatement?.result?.extensions?.['https://hsk.app/xapi/ext/hesitation-latency-ms'] ?? '-'} ms
-										{/if}
-									</td>
-									<td class="p-2.5 text-right">
-										<button
-											type="button"
-											onclick={() => viewXApiStatement(ev)}
-											class="rounded-lg bg-muted hover:bg-primary hover:text-white px-2 py-0.5 text-[10px] font-bold"
-										>
-											JSON
-										</button>
-									</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				</div>
-			{/if}
-		</div>
-	</details>
-
-	<!-- RAW xAPI MODAL -->
-	{#if showRawXApiModal && selectedStatement}
-		<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-			<div class="rounded-3xl border bg-card p-5 shadow-2xl max-w-xl w-full max-h-[80vh] flex flex-col space-y-3">
-				<div class="flex items-center justify-between border-b pb-2">
-					<h3 class="text-sm font-bold text-foreground flex items-center gap-1.5">
-						<FileText class="size-4 text-primary" />
-						<span>xAPI Statement (JSON)</span>
-					</h3>
-					<button
-						type="button"
-						onclick={() => (showRawXApiModal = false)}
-						class="rounded-full size-6 flex items-center justify-center hover:bg-muted text-muted-foreground font-bold text-xs"
-					>
-						✕
-					</button>
-				</div>
-
-				<pre class="bg-slate-950 text-emerald-400 p-3 rounded-xl text-[11px] font-mono overflow-y-auto max-h-[50vh] leading-relaxed select-all">
-{JSON.stringify(selectedStatement, null, 2)}
-				</pre>
-
-				<div class="flex justify-end">
-					<button
-						type="button"
-						onclick={() => (showRawXApiModal = false)}
-						class="rounded-xl bg-primary text-primary-foreground font-bold px-3 py-1.5 text-xs hover:opacity-90"
-					>
-						ปิด
-					</button>
-				</div>
-			</div>
-		</div>
-	{/if}
 </main>
 
