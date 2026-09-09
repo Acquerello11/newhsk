@@ -40,6 +40,7 @@ export type AcousticMetrics = {
 export type PronunciationAssessmentTelemetry = {
 	eventType: 'pronunciation_evaluation';
 	timestamp: string;
+	mode?: 'quest' | 'free_pitch';
 	userId?: string | number;
 	username?: string;
 	word: WordTargetInfo;

@@ -44,19 +44,46 @@ export const POST = async ({ locals, request, url, getClientAddress }: RequestEv
 		body.behavior_telemetry && body.scores && (body.pinyin || body.word_id)
 	);
 
-	let standardPayload: StandardTelemetryPayload;
+	function extractCanonicalWord(rawWord: any, rawWordId?: any): string {
+		if (rawWord?.hanzi) return String(rawWord.hanzi).trim();
+		const idStr = String(rawWordId || rawWord?.id || rawWord || '').trim();
+		if (idStr.startsWith('hsk') && idStr.includes('_')) {
+			const parts = idStr.split('_');
+			try {
+				return decodeURIComponent(parts[parts.length - 1]);
+			} catch {
+				return parts[parts.length - 1];
+			}
+		}
+		return idStr || 'chi_001';
+	}
+
+	function inferHskLevel(rawId?: any, explicitLevel?: any): number {
+		const lvlNum = Number(explicitLevel);
+		if (lvlNum >= 1 && lvlNum <= 3) return lvlNum;
+		const idStr = String(rawId || '');
+		if (idStr.startsWith('hsk2')) return 2;
+		if (idStr.startsWith('hsk3')) return 3;
+		if (idStr.startsWith('hsk1')) return 1;
+		return 1;
+	}
 
 	const userId = locals.user?.id
 		? String(locals.user.id)
-		: String(body.user_id || body.userId || 'usr_uuid_guest');
+		: String(body.user_id || body.userId || 'usr_uuid_local');
 	const username = locals.user?.username || body.username || `Learner_${userId}`;
+
+	const canonicalWord = extractCanonicalWord(body.word, body.word_id);
+	const determinedHskLevel = inferHskLevel(body.word?.id || body.word_id, body.hsk_level || body.hskLevel);
+
+	let standardPayload: StandardTelemetryPayload;
 
 	if (isStandardPayload) {
 		standardPayload = {
 			user_id: userId,
-			word_id: String(body.word_id || body.word?.hanzi || body.pinyin || 'chi_001'),
+			word_id: canonicalWord,
 			pinyin: String(body.pinyin || body.word?.pinyin || ''),
-			hsk_level: Number(body.hsk_level ?? 1),
+			hsk_level: determinedHskLevel,
 			attempt_number: Number(body.attempt_number ?? 1),
 			timestamp: body.timestamp || new Date().toISOString(),
 			behavior_telemetry: {
@@ -76,7 +103,10 @@ export const POST = async ({ locals, request, url, getClientAddress }: RequestEv
 			},
 			acoustics: body.acoustics,
 			feedback: body.feedback,
-			metadata: body.metadata
+			metadata: {
+				...body.metadata,
+				mode: body.mode || body.metadata?.mode || 'free_pitch'
+			}
 		};
 	} else {
 		// Adapt legacy format
@@ -86,9 +116,9 @@ export const POST = async ({ locals, request, url, getClientAddress }: RequestEv
 
 		standardPayload = {
 			user_id: userId,
-			word_id: body.word.id || body.word.hanzi,
+			word_id: canonicalWord,
 			pinyin: body.word.pinyin,
-			hsk_level: 1,
+			hsk_level: determinedHskLevel,
 			attempt_number: 1,
 			timestamp: body.timestamp || new Date().toISOString(),
 			behavior_telemetry: {
@@ -184,6 +214,12 @@ export const POST = async ({ locals, request, url, getClientAddress }: RequestEv
 		}
 
 		// E. Record to pronunciation evaluations table for rapid statistical indexing
+		const mode = standardPayload.metadata?.mode || (isStandardPayload ? 'free_pitch' : 'quest');
+		const phonemesWithMode = (standardPayload.scores.phoneme_details || []).map((p: any) => ({
+			...p,
+			mode
+		}));
+
 		await recordPronunciationEvaluation({
 			user_id: userId,
 			word_id: standardPayload.word_id,
@@ -194,7 +230,7 @@ export const POST = async ({ locals, request, url, getClientAddress }: RequestEv
 				gop_overall: standardPayload.scores.gop_overall,
 				per_overall: standardPayload.scores.per_overall,
 				tone_score: standardPayload.scores.tone_score,
-				phoneme_details: standardPayload.scores.phoneme_details
+				phoneme_details: phonemesWithMode
 			}
 		});
 

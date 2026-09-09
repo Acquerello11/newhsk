@@ -15,7 +15,7 @@ export function getDb(): Client | null {
 	if (db) return db;
 	const rawUrl = env.TURSO_DATABASE_URL?.trim() || process.env.TURSO_DATABASE_URL?.trim();
 	const authToken = env.TURSO_AUTH_TOKEN?.trim() || process.env.TURSO_AUTH_TOKEN?.trim();
-	const url = rawUrl || '';
+	const url = rawUrl || (isServerless ? '' : 'file:data/hsk.db');
 
 	if (!url) {
 		return null;
@@ -124,7 +124,38 @@ function init(): Promise<void> {
 	const client = getDb();
 	if (!client) return Promise.resolve();
 	if (!initPromise) {
-		initPromise = client.executeMultiple(SCHEMA).catch((e) => {
+		initPromise = (async () => {
+			await client.executeMultiple(SCHEMA);
+			// Migrate any legacy encoded word_ids (e.g. hsk1_1_%E7%88%B1 -> 爱)
+			try {
+				const legacyRows = await client.execute(
+					"SELECT DISTINCT word_id FROM pronunciation_evaluations WHERE word_id LIKE 'hsk%_%'"
+				);
+				for (const row of legacyRows.rows) {
+					const raw = String(row.word_id);
+					let clean = raw;
+					try {
+						clean = decodeURIComponent(clean);
+					} catch {}
+					if (clean.includes('_')) {
+						const parts = clean.split('_');
+						const hanzi = parts[parts.length - 1];
+						if (hanzi && hanzi !== raw) {
+							await client.execute({
+								sql: 'UPDATE pronunciation_evaluations SET word_id = ? WHERE word_id = ?',
+								args: [hanzi, raw]
+							});
+							await client.execute({
+								sql: 'UPDATE learning_events SET word_id = ? WHERE word_id = ?',
+								args: [hanzi, raw]
+							});
+						}
+					}
+				}
+			} catch (e) {
+				console.warn('⚠️ [DB Migration Warning]:', e);
+			}
+		})().catch((e) => {
 			initPromise = null; // allow retry on next call
 			console.error('⚠️ [DB Init Error]:', e);
 			throw e;
@@ -572,7 +603,7 @@ export async function recordPronunciationEvaluation(payload: {
 }
 
 export async function getPronunciationEvaluations(
-	userId: string,
+	userId: string | string[],
 	limit = 50
 ): Promise<Array<{
 	id: number;
@@ -592,14 +623,17 @@ export async function getPronunciationEvaluations(
 	const client = getDb();
 	if (!client) return [];
 	await init();
+	const userIds = Array.isArray(userId) ? userId : [userId];
+	if (userIds.length === 0) return [];
+	const placeholders = userIds.map(() => '?').join(',');
 	const result = await client.execute({
 		sql: `SELECT id, user_id, word_id, pinyin, attempt_number, audio_duration_sec, 
 		             gop_overall, per_overall, tone_score, phoneme_details, created_at
 		      FROM pronunciation_evaluations
-		      WHERE user_id = ?
+		      WHERE user_id IN (${placeholders})
 		      ORDER BY created_at DESC
 		      LIMIT ?`,
-		args: [String(userId), limit]
+		args: [...userIds.map(String), limit]
 	});
 
 	return result.rows.map((r) => {
@@ -627,7 +661,7 @@ export async function getPronunciationEvaluations(
 	});
 }
 
-export async function getPronunciationPhonemeErrorStats(userId: string): Promise<{
+export async function getPronunciationPhonemeErrorStats(userId: string | string[]): Promise<{
 	totalAttempts: number;
 	avgGop: number;
 	avgPer: number;
@@ -707,7 +741,7 @@ export async function recordLearningEvent(params: {
 }
 
 export async function getLearningEvents(
-	userId: string,
+	userId: string | string[],
 	eventType?: string,
 	limit = 100
 ): Promise<Array<{
@@ -723,19 +757,23 @@ export async function getLearningEvents(
 	if (!client) return [];
 	await init();
 
+	const userIds = Array.isArray(userId) ? userId : [userId];
+	if (userIds.length === 0) return [];
+	const placeholders = userIds.map(() => '?').join(',');
+
 	const sql = eventType
 		? `SELECT id, user_id, event_type, word_id, statement_id, xapi_statement, created_at
 		   FROM learning_events
-		   WHERE user_id = ? AND event_type = ?
+		   WHERE user_id IN (${placeholders}) AND event_type = ?
 		   ORDER BY created_at DESC
 		   LIMIT ?`
 		: `SELECT id, user_id, event_type, word_id, statement_id, xapi_statement, created_at
 		   FROM learning_events
-		   WHERE user_id = ?
+		   WHERE user_id IN (${placeholders})
 		   ORDER BY created_at DESC
 		   LIMIT ?`;
 
-	const args = eventType ? [String(userId), eventType, limit] : [String(userId), limit];
+	const args = eventType ? [...userIds.map(String), eventType, limit] : [...userIds.map(String), limit];
 	const result = await client.execute({ sql, args });
 
 	return result.rows.map((r) => {
@@ -846,7 +884,7 @@ const TONE_NAMES: Record<number, string> = {
 	4: 'เสียง 4 (ตกฮวบ 51)'
 };
 
-export async function getDiagnosticAnalytics(userId: string): Promise<DiagnosticAnalytics | null> {
+export async function getDiagnosticAnalytics(userId: string | string[]): Promise<DiagnosticAnalytics | null> {
 	const client = getDb();
 	if (!client) {
 		return null;

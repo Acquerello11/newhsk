@@ -65,6 +65,7 @@ export interface StandardTelemetryPayload {
 		meaning?: string;
 		is_passed?: boolean;
 		recognized_word?: string;
+		mode?: string;
 	};
 }
 
