@@ -35,10 +35,6 @@
 		predictToneNeuralNetwork
 	} from '$lib/onnxTonePredictor';
 	import {
-		transformFriendPayloadToTelemetry,
-		type StandardTelemetryPayload
-	} from '$lib/telemetry/adapter';
-	import {
 		Mic,
 		Square,
 		Volume2,
@@ -74,7 +70,8 @@
 		updatedAt: number;
 	};
 
-	// Vocabulary List State (HSK 1 active, 2-6 coming soon)
+	// Vocabulary List State
+	let currentLevel = $state<number>(1);
 	let vocabList = $state<TonePreset[]>(HSK1_VOCAB_PRESETS);
 	let searchQuery = $state('');
 	let activeToneFilter = $state<ToneNumber | 'all'>('all');
@@ -102,14 +99,9 @@
 	let errorMessage = $state<string | null>(null);
 	let recognizedWord = $state<string>('');
 
-	// Listening Behavior Telemetry State (กดฟังเสียงตัวอย่างกี่ครั้ง/ลำดับเวลา/ความเร็ว/ความลังเล)
+	// Listening Behavior Telemetry State (กดฟังเสียงตัวอย่างกี่ครั้ง/ลำดับเวลา)
 	let listenCount = $state(0);
 	let listenTimestamps = $state<number[]>([]);
-	let promptOpenedAt = $state(Date.now());
-	let actionSequence = $state<Array<{ action: string; timestamp: string; playback_speed?: number }>>([
-		{ action: 'view_prompt', timestamp: new Date().toISOString() }
-	]);
-	let playbackSpeed = $state<number>(1.0);
 
 	// Pitch Tracker & Speech Recognizer
 	let tracker: RealtimePitchTracker | null = null;
@@ -124,27 +116,6 @@
 		loadStats();
 		if (HSK1_VOCAB_PRESETS.length > 0) {
 			selectedPreset = HSK1_VOCAB_PRESETS[0];
-		}
-		// Preselect a word when arriving from the analytics dashboard (/pitch?word=...)
-		if (browser) {
-			const requestedWord = new URLSearchParams(window.location.search).get('word');
-			if (requestedWord) {
-				const allVocab = [...HSK1_VOCAB_PRESETS, ...HSK2_VOCAB_PRESETS, ...HSK3_VOCAB_PRESETS];
-				const match = allVocab.find((p) => p.hanzi === requestedWord);
-				if (match) {
-					selectedPreset = match;
-					if (!vocabList.some((p) => p.id === match.id)) {
-						vocabList = allVocab;
-					}
-					// Smooth scroll to the target practice card
-					setTimeout(() => {
-						const targetCard = document.getElementById('target-practice-card');
-						if (targetCard) {
-							targetCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
-						}
-					}, 200);
-				}
-			}
 		}
 		// Warm up the 1D-CNN + Bi-LSTM ONNX AI model in the background
 		initToneNeuralNetwork().catch(() => {});
@@ -254,26 +225,30 @@
 	function selectPreset(preset: TonePreset) {
 		listenCount = 0;
 		listenTimestamps = [];
-		promptOpenedAt = Date.now();
-		actionSequence = [{ action: 'view_prompt', timestamp: new Date().toISOString() }];
 		selectedPreset = preset;
 		resetAnalysis();
 	}
 
+	function setLevel(lvl: number) {
+		currentLevel = lvl;
+		if (lvl === 1) vocabList = HSK1_VOCAB_PRESETS;
+		else if (lvl === 2) vocabList = HSK2_VOCAB_PRESETS;
+		else if (lvl === 3) vocabList = HSK3_VOCAB_PRESETS;
+		
+		if (vocabList.length > 0) {
+			selectPreset(vocabList[0]);
+		}
+	}
+
 	/**
 	 * User explicitly clicks to listen to reference audio pronunciation.
-	 * Tracks listening sequence, playback speed, and count for learning telemetry & xAPI (LQ5).
+	 * Tracks listening sequence and count for learning telemetry & xAPI.
 	 */
-	function playAudio(speed = 1.0) {
-		playbackSpeed = speed;
+	function playAudio() {
 		listenCount++;
 		listenTimestamps = [...listenTimestamps, Date.now()];
-		actionSequence = [
-			...actionSequence,
-			{ action: 'listen_example', timestamp: new Date().toISOString(), playback_speed: speed }
-		];
 		if (selectedPreset?.hanzi) {
-			speak(selectedPreset.hanzi, speed === 0.8 ? 0.75 : 0.9);
+			speak(selectedPreset.hanzi);
 		}
 	}
 
@@ -462,6 +437,7 @@
 			let isPassed = false;
 			let finalScore = res.overallScore;
 
+			// Core Rule: If the spoken word is correct, grant pass even if tone is not 100% exact
 			if (isWordCorrect) {
 				if (isTonePerfect) {
 					isPassed = true;
@@ -469,12 +445,14 @@
 					res.overallScore = finalScore;
 					res.overallFeedback = `ยอดเยี่ยมมาก! ออกเสียงคำว่า "${selectedPreset.hanzi}" (${selectedPreset.pinyin}) ถูกต้องชัดเจน และระดับวรรณยุกต์ตรงตามมาตรฐานอย่างแม่นยำ`;
 				} else {
+					// Word is correct, tone slightly off: Give a passing score (78-88) with helpful tone advice
 					isPassed = true;
 					finalScore = Math.max(78, Math.min(88, Math.round(res.overallScore + 25)));
 					res.overallScore = finalScore;
 					res.overallFeedback = `เก่งมาก! ออกเสียงคำศัพท์ "${selectedPreset.hanzi}" ได้ถูกต้อง (ระบบให้ผ่านเกณฑ์คำศัพท์) — สามารถปรับระดับวรรณยุกต์ตามเส้นกราฟแนะนำ เพื่อให้สำเนียงสมบูรณ์แบบยิ่งขึ้น`;
 				}
 			} else {
+				// Single-syllable acoustic fallback: If tone pitch is accurate
 				if (isTonePerfect && res.overallScore >= 75) {
 					isPassed = true;
 					finalScore = res.overallScore;
@@ -489,10 +467,9 @@
 			}
 
 			res.isPassed = isPassed;
-			res.overallScore = finalScore;
 			analysisResult = res;
 
-			// Update persistent statistics
+			// Automatically update practice statistics
 			const current = wordStats[selectedPreset.id] || {
 				correctCount: 0,
 				wrongCount: 0,
@@ -514,32 +491,57 @@
 				[selectedPreset.id]: updatedStat
 			});
 
-			// 1. Transform friend's raw evaluation results via Adapter into StandardTelemetryPayload
-			const startAction = actionSequence.find((a) => a.action === 'start_recording');
-			const hesitationLatencyMs = startAction
-				? Math.max(0, new Date(startAction.timestamp).getTime() - promptOpenedAt)
-				: Math.max(0, Date.now() - promptOpenedAt);
+			const hskLevelNum = selectedPreset.id.startsWith('hsk2')
+				? 2
+				: selectedPreset.id.startsWith('hsk3')
+					? 3
+					: 1;
 
-			const telemetryPayload = transformFriendPayloadToTelemetry(
-				res,
-				{
-					hasListenedExample: listenCount > 0,
-					listenCount,
-					hesitationLatencyMs,
-					audioDurationSec: Math.round((res.totalDurationMs / 1000) * 100) / 100,
-					actionSequence: [...actionSequence]
-				},
-				{
-					userId: 'usr_uuid_local',
-					wordId: selectedPreset.id,
-					pinyin: selectedPreset.pinyin,
-					hskLevel: 1,
-					attempt: (current.correctCount + current.wrongCount + 1),
+			// 1. Send comprehensive JSON telemetry payload to /api/v1/telemetry/score-ingest for xAPI translation
+			const telemetryPayload = {
+				eventType: 'pronunciation_evaluation',
+				timestamp: new Date().toISOString(),
+				hsk_level: hskLevelNum,
+				mode: 'free_pitch',
+				word: {
+					id: selectedPreset.hanzi,
 					hanzi: selectedPreset.hanzi,
+					pinyin: selectedPreset.pinyin,
 					meaning: selectedPreset.thai || selectedPreset.english,
-					expectedTone: selectedPreset.tone
+					expectedTone: selectedPreset.tone,
+					tonePattern: selectedPreset.tonePattern
+				},
+				behavior: {
+					listenedToExample: listenCount > 0,
+					listenCount: listenCount,
+					listenTimestamps: [...listenTimestamps]
+				},
+				assessment: {
+					isPassed: isPassed,
+					overallScore: finalScore,
+					rawScore: res.overallScore,
+					isToneMatch: isTonePerfect,
+					isWordMatch: isWordCorrect,
+					recognizedWord: finalHeard || undefined,
+					speechCandidates: [...speechCandidates],
+					syllableResults: res.syllableResults.map((s) => ({
+						syllableIndex: s.syllableIndex,
+						hanzi: s.hanzi,
+						pinyin: s.pinyin,
+						targetTone: s.targetTone,
+						detectedTone: s.detectedTone,
+						isMatch: s.isMatch,
+						score: s.score,
+						feedback: s.feedback,
+						isAIModel: s.isAIModel
+					})),
+					acoustics: {
+						avgF0: res.avgF0,
+						totalDurationMs: res.totalDurationMs
+					},
+					overallFeedback: res.overallFeedback
 				}
-			);
+			};
 
 			fetch('/api/v1/telemetry/score-ingest', {
 				method: 'POST',
@@ -613,15 +615,20 @@
 
 	<!-- 1. HSK LEVEL PILLS BAR (TOP) -->
 	<div class="mb-4 flex flex-wrap items-center gap-2">
-		<button
-			type="button"
-			class="flex items-center gap-1.5 rounded-full bg-slate-900 dark:bg-white px-4 py-1.5 text-xs font-extrabold text-white dark:text-slate-900 shadow-sm"
-		>
-			<span>HSK 1</span>
-			<span class="text-[10px] opacity-80">({vocabList.length} คำ)</span>
-		</button>
+		{#each [1, 2, 3] as lvl (lvl)}
+			<button
+				type="button"
+				onclick={() => setLevel(lvl)}
+				class="flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-extrabold transition-all {currentLevel === lvl ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm' : 'bg-muted/40 border border-border/80 text-muted-foreground hover:bg-muted'}"
+			>
+				<span>HSK {lvl}</span>
+				{#if currentLevel === lvl}
+					<span class="text-[10px] opacity-80">({vocabList.length} คำ)</span>
+				{/if}
+			</button>
+		{/each}
 
-		{#each [2, 3, 4, 5, 6] as lvl (lvl)}
+		{#each [4, 5, 6] as lvl (lvl)}
 			<div
 				class="flex items-center gap-1 rounded-full border border-border/80 bg-muted/40 px-3.5 py-1.5 text-xs font-medium text-muted-foreground opacity-75"
 			>
@@ -730,7 +737,7 @@
 		<div class="mb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
 			<div class="flex items-center gap-2">
 				<BookOpen class="size-4 text-primary shrink-0" />
-				<h2 class="text-lg sm:text-xl font-black tracking-tight">คลังคำศัพท์ HSK 1</h2>
+				<h2 class="text-lg sm:text-xl font-black tracking-tight">คลังคำศัพท์ HSK {currentLevel}</h2>
 				<span class="text-xs text-muted-foreground font-semibold">({filteredPresets.length} คำที่แสดง)</span>
 			</div>
 
@@ -867,29 +874,19 @@
 		<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5">
 			<!-- Word Details -->
 			<div class="flex items-center gap-4 sm:gap-5">
-				<!-- Big Listen Audio Button with Speed Options (LQ5 Telemetry) -->
-				<div class="flex flex-col items-center gap-1.5 shrink-0">
-					<button
-						type="button"
-						onclick={() => playAudio(1.0)}
-						class="group relative flex size-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-tr from-sky-500 to-blue-600 text-white shadow-md shadow-sky-500/25 transition active:scale-95 hover:shadow-lg hover:shadow-sky-500/40 hover:scale-105"
-						aria-label="กดฟังเสียง"
-						title="กดฟังเสียงต้นแบบเจ้าของภาษา (ความเร็วปกติ 1.0x)"
-					>
-						<Volume2 class="size-8 transition-transform group-hover:scale-110" />
-						<span class="absolute -bottom-2 rounded-full px-2 py-0.5 text-[9px] font-bold text-white shadow transition-all {listenCount > 0 ? 'bg-emerald-600' : 'bg-slate-900'}">
-							{listenCount > 0 ? `ฟัง ${listenCount} ครั้ง` : 'ฟังเสียง'}
-						</span>
-					</button>
-					<button
-						type="button"
-						onclick={() => playAudio(0.8)}
-						class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 hover:bg-sky-200 transition"
-						title="กดฟังเสียงแบบช้าลง (0.8x)"
-					>
-						🐢 ช้า 0.8x
-					</button>
-				</div>
+				<!-- Big Listen Audio Button (Plays sound only on user click!) -->
+				<button
+					type="button"
+					onclick={playAudio}
+					class="group relative flex size-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-tr from-sky-500 to-blue-600 text-white shadow-md shadow-sky-500/25 transition active:scale-95 hover:shadow-lg hover:shadow-sky-500/40 hover:scale-105"
+					aria-label="กดฟังเสียง"
+					title="กดฟังเสียงต้นแบบเจ้าของภาษา (คลิกเพื่อฟัง)"
+				>
+					<Volume2 class="size-8 transition-transform group-hover:scale-110" />
+					<span class="absolute -bottom-2 rounded-full px-2 py-0.5 text-[9px] font-bold text-white shadow transition-all {listenCount > 0 ? 'bg-emerald-600' : 'bg-slate-900'}">
+						{listenCount > 0 ? `ฟังแล้ว ${listenCount} ครั้ง` : 'กดฟังเสียง'}
+					</span>
+				</button>
 
 				<div>
 					<div class="flex items-baseline gap-3">
@@ -1279,7 +1276,7 @@
 				</div>
 
 				<div class="flex items-center gap-2">
-					<Button variant="outline" size="sm" onclick={() => playAudio()}>
+					<Button variant="outline" size="sm" onclick={playAudio}>
 						<Volume2 class="mr-1.5 size-3.5" /> ฟังเสียงตัวอย่าง
 					</Button>
 					<Button size="sm" onclick={resetAnalysis} class="bg-primary text-primary-foreground">

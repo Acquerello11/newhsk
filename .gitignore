@@ -29,10 +29,3 @@ vite.config.ts.timestamp-*
 .env*
 __pycache__/
 *.pyc
-
-# Python backend
-backend/.venv/
-.pytest_cache/
-
-# ZCode local state
-.zcode/
