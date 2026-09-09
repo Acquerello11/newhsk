@@ -23,7 +23,20 @@ export async function initNeonSchema() {
 	if (isSchemaInitialized) return;
 	try {
 		const sql = getNeonClient();
-		// 1. Table for detailed phoneme breakdown (Phonetic Evaluation Analytics)
+
+		// 1. Table for user consents (PDPA & Research Agreement)
+		await sql`
+			CREATE TABLE IF NOT EXISTS user_consents (
+				user_id UUID PRIMARY KEY,
+				terms_accepted BOOLEAN NOT NULL DEFAULT false,
+				audio_consent BOOLEAN NOT NULL DEFAULT false,
+				research_consent BOOLEAN NOT NULL DEFAULT false,
+				consent_version VARCHAR(20) NOT NULL DEFAULT 'v1.0',
+				consented_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+			);
+		`;
+
+		// 2. Table for detailed phoneme breakdown (Phonetic Evaluation Analytics)
 		await sql`
 			CREATE TABLE IF NOT EXISTS phoneme_evaluations (
 				id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -47,8 +60,38 @@ export async function initNeonSchema() {
 			CREATE INDEX IF NOT EXISTS idx_phoneme_eval_user ON phoneme_evaluations(user_id);
 		`;
 
+		// 3. Table for learning events & xAPI statements (IEEE 9274.1.1)
+		await sql`
+			CREATE TABLE IF NOT EXISTS learning_events (
+				id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+				user_id UUID NOT NULL,
+				verb VARCHAR(50) NOT NULL,
+				lesson_id VARCHAR(50) NOT NULL,
+				word VARCHAR(50) NOT NULL,
+				target_tone INTEGER,
+				detected_tone INTEGER,
+				is_correct BOOLEAN NOT NULL,
+				confidence DOUBLE PRECISION,
+				xapi_statement JSONB NOT NULL,
+				created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+			);
+		`;
+
+		await sql`
+			CREATE INDEX IF NOT EXISTS idx_events_user_created ON learning_events(user_id, created_at);
+		`;
+		await sql`
+			CREATE INDEX IF NOT EXISTS idx_events_user_verb ON learning_events(user_id, verb);
+		`;
+		await sql`
+			CREATE INDEX IF NOT EXISTS idx_events_word ON learning_events(word);
+		`;
+		await sql`
+			CREATE INDEX IF NOT EXISTS idx_events_xapi_gin ON learning_events USING GIN(xapi_statement);
+		`;
+
 		isSchemaInitialized = true;
-		console.log('✅ [Neon DB] Connected and verified phoneme_evaluations table in Neon PostgreSQL.');
+		console.log('✅ [Neon DB] Connected and verified all 3 tables in Neon PostgreSQL.');
 	} catch (err) {
 		console.warn('⚠️ [Neon DB Initialization Warning]:', err);
 	}
