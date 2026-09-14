@@ -448,3 +448,50 @@ export const ALL_QUEST_STAGES: QuestStage[] = [
 export const QUEST_STAGE_MAP = new Map<string, QuestStage>(
 	ALL_QUEST_STAGES.map((s) => [s.id, s])
 );
+
+/**
+ * Dynamically generates an adaptive remedial quest stage targeting the learner's weak words.
+ */
+export function createRemedialStage(remedialWords: TonePreset[]): QuestStage {
+	const words = remedialWords.slice(0, 5);
+	const challenges: Challenge[] = [];
+
+	words.forEach((word, idx) => {
+		// 1. Listen & speak with native audio (phoneme & tone perception)
+		challenges.push({
+			id: `rem-${idx}-listen`,
+			type: 'listen_speak',
+			word
+		});
+
+		// 2. Speak recall (independent pronunciation)
+		challenges.push({
+			id: `rem-${idx}-speak`,
+			type: 'speak',
+			word
+		});
+	});
+
+	// 3. Sentence build (contextual sentence practice with first remedial word)
+	if (words[0]) {
+		const sentence = generateSentence(words[0]);
+		challenges.push({
+			id: 'rem-sentence',
+			type: 'sentence_build',
+			word: words[0],
+			sentenceHanzi: sentence.hanzi,
+			sentencePinyin: sentence.pinyin,
+			sentenceThai: sentence.thai
+		});
+	}
+
+	return {
+		id: 'remedial',
+		hskLevel: 1,
+		stageIndex: 0,
+		title: 'ด่านซ่อมเสริมพิเศษ',
+		words,
+		challenges
+	};
+}
+

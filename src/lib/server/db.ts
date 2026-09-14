@@ -2,7 +2,7 @@
 // and against a remote Turso database (libsql://...) in production.
 
 import { createClient, type Client } from '@libsql/client';
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { env } from '$env/dynamic/private';
@@ -1069,3 +1069,180 @@ export async function getDiagnosticAnalytics(userId: string | string[]): Promise
 		weakTones
 	};
 }
+
+// -------------------------------------------------------------
+// Research Data Export (LQ1-LQ8 & IEEE 9274.1.1 xAPI Telemetry)
+// -------------------------------------------------------------
+
+/**
+ * Anonymizes user identifiers into a pseudonymous research ID for PDPA & IRB compliance.
+ * e.g. "p_6b86b273ff"
+ */
+export function anonymizeUserId(rawUserId: string): string {
+	if (!rawUserId) return 'p_anonymous';
+	const salt = 'yupakjeen_pdpa_research_2026';
+	const hash = createHash('sha256').update(String(rawUserId) + salt).digest('hex');
+	return `p_${hash.slice(0, 10)}`;
+}
+
+export type ExportableEvaluationRecord = {
+	evaluationId: number;
+	timestampIso: string;
+	anonymizedUserId: string;
+	wordId: string;
+	pinyin: string;
+	targetTone: number | null;
+	detectedTone: number | null;
+	isToneMatch: boolean;
+	gopOverall: number;
+	perOverall: number;
+	toneScore: number;
+	attemptNumber: number;
+	audioDurationSec: number;
+	listenedToExample: boolean;
+	exampleListenCount: number;
+	hesitationLatencyMs: number | null;
+	phonemeErrorsSummary: string;
+};
+
+export async function getAllPronunciationEvaluationsForExport(limit = 10000): Promise<ExportableEvaluationRecord[]> {
+	const client = getDb();
+	if (!client) return [];
+	await init();
+
+	const result = await client.execute({
+		sql: `SELECT id, user_id, word_id, pinyin, attempt_number, audio_duration_sec,
+		             gop_overall, per_overall, tone_score, phoneme_details, created_at
+		      FROM pronunciation_evaluations
+		      ORDER BY created_at DESC
+		      LIMIT ?`,
+		args: [limit]
+	});
+
+	return result.rows.map((r) => {
+		let phonemeDetails: any[] = [];
+		try {
+			phonemeDetails = JSON.parse(String(r.phoneme_details || '[]'));
+		} catch {
+			phonemeDetails = [];
+		}
+
+		let targetTone: number | null = null;
+		let detectedTone: number | null = null;
+		let listenedToExample = false;
+		let exampleListenCount = 0;
+		let hesitationLatencyMs: number | null = null;
+		const errorItems: string[] = [];
+
+		for (const d of phonemeDetails) {
+			if (d.targetTone !== undefined && targetTone === null) {
+				targetTone = Number(d.targetTone);
+			}
+			if (d.detectedTone !== undefined && detectedTone === null) {
+				detectedTone = Number(d.detectedTone);
+			}
+			if (d.listenedToExample !== undefined) {
+				listenedToExample = Boolean(d.listenedToExample);
+			}
+			if (d.exampleListenCount !== undefined) {
+				exampleListenCount = Number(d.exampleListenCount);
+			}
+			if (d.hesitationLatencyMs !== undefined) {
+				hesitationLatencyMs = Number(d.hesitationLatencyMs);
+			}
+			if (d.status === 'substitution' && d.target && d.recognized) {
+				errorItems.push(`${d.target}->${d.recognized}`);
+			}
+		}
+
+		const isToneMatch = targetTone !== null && detectedTone !== null && targetTone === detectedTone;
+		const createdAtMs = Number(r.created_at);
+
+		return {
+			evaluationId: Number(r.id),
+			timestampIso: new Date(createdAtMs).toISOString(),
+			anonymizedUserId: anonymizeUserId(String(r.user_id)),
+			wordId: String(r.word_id),
+			pinyin: String(r.pinyin),
+			targetTone,
+			detectedTone,
+			isToneMatch,
+			gopOverall: Number(r.gop_overall),
+			perOverall: Number(r.per_overall),
+			toneScore: Number(r.tone_score),
+			attemptNumber: Number(r.attempt_number),
+			audioDurationSec: Number(r.audio_duration_sec),
+			listenedToExample,
+			exampleListenCount,
+			hesitationLatencyMs,
+			phonemeErrorsSummary: errorItems.join(';')
+		};
+	});
+}
+
+export async function getAllLearningEventsForExport(limit = 10000): Promise<any[]> {
+	const client = getDb();
+	if (!client) return [];
+	await init();
+
+	const result = await client.execute({
+		sql: `SELECT id, user_id, event_type, word_id, statement_id, xapi_statement, created_at
+		      FROM learning_events
+		      ORDER BY created_at DESC
+		      LIMIT ?`,
+		args: [limit]
+	});
+
+	return result.rows.map((r) => {
+		let parsed: any = {};
+		try {
+			parsed = JSON.parse(String(r.xapi_statement || '{}'));
+		} catch {
+			parsed = {};
+		}
+
+		const anonId = anonymizeUserId(String(r.user_id));
+		if (parsed.actor) {
+			parsed.actor = {
+				objectType: 'Agent',
+				name: `Participant_${anonId.slice(-6)}`,
+				account: {
+					homePage: 'https://yupakjeen.research.internal',
+					name: anonId
+				}
+			};
+		}
+
+		return parsed;
+	});
+}
+
+export async function getResearchExportStats(): Promise<{
+	totalEvaluations: number;
+	totalEvents: number;
+	totalParticipants: number;
+}> {
+	const client = getDb();
+	if (!client) {
+		return { totalEvaluations: 0, totalEvents: 0, totalParticipants: 0 };
+	}
+	await init();
+
+	try {
+		const [evalsRes, eventsRes, participantsRes] = await Promise.all([
+			client.execute('SELECT COUNT(*) as count FROM pronunciation_evaluations'),
+			client.execute('SELECT COUNT(*) as count FROM learning_events'),
+			client.execute('SELECT COUNT(DISTINCT user_id) as count FROM pronunciation_evaluations')
+		]);
+
+		return {
+			totalEvaluations: Number(evalsRes.rows[0]?.count ?? 0),
+			totalEvents: Number(eventsRes.rows[0]?.count ?? 0),
+			totalParticipants: Number(participantsRes.rows[0]?.count ?? 0)
+		};
+	} catch (err) {
+		console.warn('⚠️ [DB] Failed to get research export stats:', err);
+		return { totalEvaluations: 0, totalEvents: 0, totalParticipants: 0 };
+	}
+}
+
