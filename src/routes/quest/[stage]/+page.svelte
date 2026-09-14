@@ -23,13 +23,8 @@
 	} from '$lib/speech';
 	import { sendPronunciationTelemetry } from '$lib/telemetry/client';
 
-	import type { PageData } from './$types';
-
-	let { data }: { data: PageData } = $props();
-
-	const stageId = $derived($page.params.stage || '');
-	const stageData = $derived<QuestStage | undefined>(data.remedialStage || QUEST_STAGE_MAP.get(stageId));
-	const isRemedial = $derived(Boolean(data.isRemedial));
+	const stageId = $page.params.stage || '';
+	const stageData: QuestStage | undefined = QUEST_STAGE_MAP.get(stageId);
 
 	let currentIndex = $state(0);
 	let isRecording = $state(false);
@@ -365,8 +360,8 @@
 
 	function triggerVictory() {
 		phase = 'victory';
-		progress.addXp(isRemedial ? 30 : 25);
-		if (stageId && !isRemedial) progress.completeLesson(stageId, 3);
+		progress.addXp(25);
+		if (stageId) progress.completeLesson(stageId, 3);
 	}
 
 </script>
@@ -378,15 +373,11 @@
 		<div class="text-center py-20">Loading...</div>
 	{:else if phase === 'victory'}
 		<div class="flex flex-col items-center justify-center py-20 text-center animate-in zoom-in duration-500">
-			<div class="size-32 rounded-full bg-emerald-500/15 flex items-center justify-center mb-6 shadow-xl border border-emerald-500/30">
-				<Sparkles class="size-16 text-emerald-600 dark:text-emerald-400" />
+			<div class="size-32 rounded-full bg-yellow-100 flex items-center justify-center mb-6 shadow-2xl">
+				<Sparkles class="size-16 text-yellow-500" />
 			</div>
-			<h1 class="text-3xl font-extrabold text-foreground mb-2">
-				{isRemedial ? 'แก้จุดอ่อนสำเร็จ' : 'ผ่านด่านสำเร็จ'}
-			</h1>
-			<p class="text-muted-foreground mb-8">
-				{isRemedial ? 'คุณได้ฝึกซ้ำคำศัพท์ที่มีจุดบกพร่องเรียบร้อยแล้ว ได้รับ +30 XP' : 'คุณได้รับ +25 XP และทบทวนคำศัพท์เรียบร้อยแล้ว'}
-			</p>
+			<h1 class="text-3xl font-extrabold text-foreground mb-2">ผ่านด่านสำเร็จ!</h1>
+			<p class="text-muted-foreground mb-8">คุณได้รับ +25 XP และทบทวนคำศัพท์เรียบร้อยแล้ว</p>
 			<a href="/" class="w-full rounded-2xl bg-primary py-4 text-center font-bold text-primary-foreground shadow-lg transition hover:bg-primary/90">
 				กลับไปหน้าแผนที่
 			</a>

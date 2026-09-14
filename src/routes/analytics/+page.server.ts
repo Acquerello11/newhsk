@@ -7,10 +7,13 @@ import {
 	getPronunciationEvaluations
 } from '$lib/server/db';
 import { generateRemedialVocab, type RemedialCard } from '$lib/analytics/remedialEngine';
+<<<<<<< Updated upstream
+=======
 import {
 	generateMistakeArticulationGuides,
 	type DynamicArticulationGuide
 } from '$lib/analytics/articulationGuides';
+>>>>>>> Stashed changes
 import { HSK1_VOCAB_PRESETS, HSK2_VOCAB_PRESETS, HSK3_VOCAB_PRESETS } from '$lib/vocabLoader';
 import type { TonePreset } from '$lib/pitch';
 import type { PageServerLoad } from './$types';
@@ -66,7 +69,10 @@ export type HskLevelSummary = {
 	unpracticedCount: number;
 	avgAccuracy: number | null;
 	remedialCards: (RemedialCard & { hskLevel: 1 | 2 | 3 })[];
+<<<<<<< Updated upstream
+=======
 	articulationGuides: DynamicArticulationGuide[];
+>>>>>>> Stashed changes
 	words: VocabItemMastery[];
 };
 
@@ -191,8 +197,11 @@ export const load: PageServerLoad = async ({ locals }) => {
 			hskLevel: level
 		}));
 
+<<<<<<< Updated upstream
+=======
 		const articulationGuides = generateMistakeArticulationGuides(words, 3);
 
+>>>>>>> Stashed changes
 		return {
 			level,
 			name,
@@ -208,7 +217,10 @@ export const load: PageServerLoad = async ({ locals }) => {
 			unpracticedCount,
 			avgAccuracy,
 			remedialCards: remedial,
+<<<<<<< Updated upstream
+=======
 			articulationGuides,
+>>>>>>> Stashed changes
 			words
 		};
 	}
@@ -216,7 +228,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 	const hsk1Summary = buildLevelSummary(
 		1,
 		'HSK 1',
-		'ระดับพื้นฐาน',
+		'ระดับต้นพื้นฐาน',
 		'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
 		'from-emerald-500 to-teal-600',
 		HSK1_VOCAB_PRESETS
@@ -225,7 +237,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 	const hsk2Summary = buildLevelSummary(
 		2,
 		'HSK 2',
-		'ระดับต้น',
+		'ระดับต้นกลาง',
 		'bg-blue-500/10 text-blue-600 border-blue-500/20',
 		'from-blue-500 to-cyan-600',
 		HSK2_VOCAB_PRESETS
@@ -234,7 +246,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 	const hsk3Summary = buildLevelSummary(
 		3,
 		'HSK 3',
-		'ระดับกลาง',
+		'ระดับสื่อสารคล่องแคล่ว',
 		'bg-purple-500/10 text-purple-600 border-purple-500/20',
 		'from-purple-500 to-pink-600',
 		HSK3_VOCAB_PRESETS
@@ -261,10 +273,13 @@ export const load: PageServerLoad = async ({ locals }) => {
 		};
 	});
 
+<<<<<<< Updated upstream
+=======
 	// Overall articulation guides based on all mistake words across all levels
 	const allWords = [...hsk1Summary.words, ...hsk2Summary.words, ...hsk3Summary.words];
 	const overallArticulationGuides = generateMistakeArticulationGuides(allWords, 4);
 
+>>>>>>> Stashed changes
 	return {
 		user: locals.user || null,
 		diagnostic: diagnosticData,
@@ -277,7 +292,10 @@ export const load: PageServerLoad = async ({ locals }) => {
 			coveragePercent: overallCoveragePercent
 		},
 		overallRemedialCards,
+<<<<<<< Updated upstream
+=======
 		overallArticulationGuides,
+>>>>>>> Stashed changes
 		topMistakes,
 		recentMistakes,
 		mistakeStats,

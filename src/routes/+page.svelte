@@ -1,21 +1,8 @@
 <script lang="ts">
 	import { progress } from '$lib/progress.svelte';
 	import AppHeader from '$lib/components/AppHeader.svelte';
-	import {
-		Star,
-		Gamepad2,
-		Heart,
-		Zap,
-		BookOpen,
-		Flame,
-		Activity,
-		MessageSquare,
-		Sparkles,
-		ArrowRight
-	} from '@lucide/svelte';
+	import { Star, Gamepad2, Heart, Zap, BookOpen } from '@lucide/svelte';
 	import { ALL_QUEST_STAGES } from '$lib/data/questLevels';
-
-	let { data } = $props();
 
 	let selectedLevel = $state<number>(1);
 	const filteredStages = $derived(ALL_QUEST_STAGES.filter(s => s.hskLevel === selectedLevel));
@@ -35,57 +22,22 @@
 			<span>{progress.xp} XP</span>
 		</div>
 		<div class="flex items-center gap-1.5 font-bold text-orange-500">
-			<Flame class="size-5 fill-orange-500" />
+			<span class="text-lg">🔥</span>
 			<span>{progress.streak}</span>
 		</div>
 	</div>
 
 	<!-- Extra Modes Banner -->
-	<div class="mb-6 flex gap-3">
-		<a href="/pitch" class="flex-1 rounded-2xl bg-gradient-to-br from-emerald-500 to-cyan-600 p-4 text-white shadow-md transition hover:scale-[1.02]">
-			<Activity class="size-6 mb-2 text-white" />
+	<div class="mb-8 flex gap-3">
+		<a href="/pitch" class="flex-1 rounded-2xl bg-gradient-to-br from-emerald-500 to-cyan-600 p-4 text-white shadow-lg transition hover:scale-[1.02]">
+			<div class="text-2xl mb-1">📈</div>
 			<div class="text-sm font-bold">วิเคราะห์การออกเสียง</div>
 		</a>
-		<a href="/talk" class="flex-1 rounded-2xl bg-gradient-to-br from-violet-500 to-pink-500 p-4 text-white shadow-md transition hover:scale-[1.02]">
-			<MessageSquare class="size-6 mb-2 text-white" />
+		<a href="/talk" class="flex-1 rounded-2xl bg-gradient-to-br from-violet-500 to-pink-500 p-4 text-white shadow-lg transition hover:scale-[1.02]">
+			<div class="text-2xl mb-1">💬</div>
 			<div class="text-sm font-bold">สถานการณ์จำลอง</div>
 		</a>
 	</div>
-
-	<!-- Adaptive Remedial Stage Banner -->
-	{#if data?.remedialCards && data.remedialCards.length > 0}
-		<div class="mb-6 rounded-3xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 via-card to-cyan-500/5 p-4 shadow-xs">
-			<div class="flex items-center justify-between gap-3">
-				<div class="flex items-center gap-2.5">
-					<div class="flex size-10 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-xs">
-						<Sparkles class="size-5" />
-					</div>
-					<div>
-						<div class="flex items-center gap-1.5">
-							<span class="text-xs font-black text-emerald-600 dark:text-emerald-400">ด่านซ่อมเสริมพิเศษ</span>
-							<span class="rounded-full bg-emerald-500/15 px-2 py-0.2 text-[10px] font-bold text-emerald-700 dark:text-emerald-300">Adaptive</span>
-						</div>
-						<div class="text-xs text-muted-foreground mt-0.5">ฝึกทบทวน {data.remedialCards.length} คำที่มีจุดบกพร่อง</div>
-					</div>
-				</div>
-				<a
-					href="/quest/remedial"
-					class="inline-flex items-center gap-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 text-xs font-bold shadow-xs transition active:scale-95"
-				>
-					<span>เริ่มด่าน</span>
-					<ArrowRight class="size-3.5" />
-				</a>
-			</div>
-			<div class="mt-3 flex flex-wrap gap-1.5 pt-2 border-t border-border/40">
-				{#each data.remedialCards as card}
-					<span class="inline-flex items-center gap-1 rounded-lg bg-background/80 px-2 py-1 text-xs border font-medium">
-						<span class="font-bold text-foreground">{card.hanzi}</span>
-						<span class="text-[10px] text-muted-foreground font-mono">{card.pinyin}</span>
-					</span>
-				{/each}
-			</div>
-		</div>
-	{/if}
 
 	<div class="text-center mb-6">
 		<h1 class="text-3xl font-extrabold tracking-tight">HSK Quest</h1>
