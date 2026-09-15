@@ -26,6 +26,7 @@
 		Unlock,
 		Wind
 	} from '@lucide/svelte';
+	import { speak } from '$lib/speech';
 
 	let { data } = $props();
 
@@ -789,13 +790,24 @@
 								</div>
 							</div>
 
-							<a
-								href="/pitch?word={encodeURIComponent(card.hanzi)}"
-								class="flex items-center justify-center gap-2 w-full rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 text-xs font-black shadow-sm transition active:scale-95"
-							>
-								<Mic class="size-4" />
-								<span>ฝึกพูดคำนี้</span>
-							</a>
+							<div class="flex items-center gap-2 pt-1">
+								<button
+									type="button"
+									onclick={() => speak(card.hanzi)}
+									class="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-2xl border border-input bg-card hover:bg-accent text-foreground text-xs font-bold transition active:scale-95 cursor-pointer"
+									title="ฟังเสียงออกเสียงภาษาจีน"
+								>
+									<Volume2 class="size-4 text-emerald-600" />
+									<span>ฟังเสียง</span>
+								</button>
+								<a
+									href="/pitch?word={encodeURIComponent(card.hanzi)}"
+									class="flex-1 flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 text-xs font-black shadow-sm transition active:scale-95 cursor-pointer"
+								>
+									<Mic class="size-4" />
+									<span>ฝึกพูดคำนี้</span>
+								</a>
+							</div>
 						</div>
 					{/each}
 				</div>

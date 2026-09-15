@@ -1,6 +1,7 @@
 import { json, error, type RequestEvent } from '@sveltejs/kit';
 import {
 	recordPronunciationEvaluation,
+	recordPhonemeEvaluations,
 	getPronunciationEvaluations,
 	getPronunciationPhonemeErrorStats
 } from '$lib/server/db';
@@ -44,6 +45,20 @@ export const GET = async ({ locals, url }: RequestEvent) => {
 	});
 };
 
+function normalizeWordId(rawId: string): string {
+	if (!rawId) return '';
+	let clean = rawId.trim();
+	try {
+		clean = decodeURIComponent(clean);
+	} catch {}
+	if (clean.includes('_')) {
+		const parts = clean.split('_');
+		const lastPart = parts[parts.length - 1];
+		if (lastPart) clean = lastPart;
+	}
+	return clean;
+}
+
 // POST /api/analytics/pronunciation
 // Body: LearnerPronunciationPayload or { items: LearnerPronunciationPayload[] }
 export const POST = async ({ locals, request }: RequestEvent) => {
@@ -65,20 +80,6 @@ export const POST = async ({ locals, request }: RequestEvent) => {
 	}
 
 	const processedItems: LearnerPronunciationPayload[] = [];
-
-function normalizeWordId(rawId: string): string {
-	if (!rawId) return '';
-	let clean = rawId.trim();
-	try {
-		clean = decodeURIComponent(clean);
-	} catch {}
-	if (clean.includes('_')) {
-		const parts = clean.split('_');
-		const lastPart = parts[parts.length - 1];
-		if (lastPart) clean = lastPart;
-	}
-	return clean;
-}
 
 	for (const item of rawItems) {
 		const userId = String(item.user_id || (locals.user ? locals.user.id : 'usr_uuid_local'));
@@ -129,6 +130,24 @@ function normalizeWordId(rawId: string): string {
 		};
 
 		await recordPronunciationEvaluation(validPayload);
+
+		// Also record detailed phoneme breakdown into phoneme_evaluations table
+		if (phonemeDetails.length > 0) {
+			await recordPhonemeEvaluations(
+				phonemeDetails.map((pd) => ({
+					userId,
+					wordId,
+					pinyin,
+					phoneme: pd.phoneme,
+					phonemeType: pd.type,
+					gop: pd.gop,
+					status: pd.status,
+					target: pd.target,
+					recognized: pd.recognized
+				}))
+			);
+		}
+
 		processedItems.push(validPayload);
 	}
 

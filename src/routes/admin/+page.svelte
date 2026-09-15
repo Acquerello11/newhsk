@@ -12,9 +12,9 @@
 		Circle,
 		Shield,
 		LogIn,
+		Download,
 		FileSpreadsheet,
 		FileCode,
-		ShieldCheck,
 		Info
 	} from '@lucide/svelte';
 	import { enhance } from '$app/forms';
@@ -150,60 +150,63 @@
 				<Flame class="size-4 text-orange-500" />
 			</div>
 			<div class="mt-1 text-3xl font-extrabold">{data.stats.activeToday}</div>
-			<div class="text-xs text-muted-foreground">top streak {data.stats.topStreak} d</div>
+			<div class="text-xs text-muted-foreground">top streak {data.stats.topStreak}🔥</div>
 		</div>
 	</div>
 
-	<!-- Research Data & Learning Analytics Export Center -->
-	<section class="mb-8 overflow-hidden rounded-3xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 via-card to-cyan-500/5 p-6 shadow-sm">
-		<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+	<!-- Research & Telemetry Export Section -->
+	<section class="mb-8 rounded-3xl border bg-card p-5 sm:p-6 shadow-sm">
+		<div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
 			<div>
-				<div class="flex items-center gap-2">
-					<span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
-						<ShieldCheck class="size-3.5" /> PDPA Anonymized Dataset
-					</span>
-					<span class="rounded-full bg-muted px-2.5 py-0.5 text-xs font-mono text-muted-foreground">
-						IEEE 9274.1.1 (xAPI)
-					</span>
+				<div class="flex items-center gap-2.5">
+					<div class="flex size-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+						<Download class="size-5" />
+					</div>
+					<div>
+						<h2 class="text-lg font-extrabold text-foreground">ดาวน์โหลดข้อมูลการวิจัย (Research Dataset & Telemetry)</h2>
+						<p class="text-xs text-muted-foreground">
+							ส่งออกชุดข้อมูลสำหรับงานวิจัย CAPT ตามมาตรฐาน PDPA (ปกปิดตัวตนอัตโนมัติ) เพื่อนำไปวิเคราะห์ใน SPSS, Excel, Python หรือ R
+						</p>
+					</div>
 				</div>
-				<h2 class="mt-2 text-xl font-extrabold tracking-tight">ศูนย์ดาวน์โหลดข้อมูลวิจัย (Research Data Export)</h2>
-				<p class="mt-1 text-sm text-muted-foreground">
-					ชุดข้อมูลสถิติสัทศาสตร์และพฤติกรรมการเรียนรู้ รองรับการทดสอบสมมติฐานคำถามวิจัย <strong>LQ1–LQ8</strong> (SPSS, R, Python)
-				</p>
 			</div>
 
-			<!-- Quick Stat Badges -->
-			<div class="flex flex-wrap gap-2 text-xs">
-				<div class="rounded-2xl border bg-card/80 px-3 py-2 text-center backdrop-blur shadow-xs">
-					<div class="font-extrabold text-foreground text-base font-mono">{data.researchStats?.totalEvaluations ?? 0}</div>
-					<div class="text-[11px] text-muted-foreground">การออกเสียง (GOP/PER)</div>
+			<!-- Live counts badges -->
+			{#if data.researchStats}
+				<div class="flex flex-wrap items-center gap-2 text-xs">
+					<span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 font-semibold text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">
+						<span class="size-1.5 rounded-full bg-emerald-500"></span>
+						{data.researchStats.totalEvaluations} ผลประเมิน
+					</span>
+					<span class="inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 px-3 py-1 font-semibold text-blue-700 dark:text-blue-300 border border-blue-500/20">
+						<span class="size-1.5 rounded-full bg-blue-500"></span>
+						{data.researchStats.totalEvents} xAPI Events
+					</span>
+					<span class="inline-flex items-center gap-1.5 rounded-full bg-purple-500/10 px-3 py-1 font-semibold text-purple-700 dark:text-purple-300 border border-purple-500/20">
+						<span class="size-1.5 rounded-full bg-purple-500"></span>
+						{data.researchStats.totalParticipants} ผู้เข้าร่วม (PDPA)
+					</span>
 				</div>
-				<div class="rounded-2xl border bg-card/80 px-3 py-2 text-center backdrop-blur shadow-xs">
-					<div class="font-extrabold text-foreground text-base font-mono">{data.researchStats?.totalEvents ?? 0}</div>
-					<div class="text-[11px] text-muted-foreground">xAPI Events</div>
-				</div>
-				<div class="rounded-2xl border bg-card/80 px-3 py-2 text-center backdrop-blur shadow-xs">
-					<div class="font-extrabold text-foreground text-base font-mono">{data.researchStats?.totalParticipants ?? 0}</div>
-					<div class="text-[11px] text-muted-foreground">ผู้เข้าร่วมวิจัย</div>
-				</div>
-			</div>
+			{/if}
 		</div>
 
 		<!-- Action Buttons -->
 		<div class="mt-5 flex flex-wrap gap-3 pt-4 border-t border-border/60">
 			<a
+				id="btn-export-csv"
 				href="/api/admin/export?format=csv"
 				download
-				class="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700 hover:shadow"
+				class="inline-flex items-center gap-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 text-sm font-bold shadow-md shadow-emerald-600/20 transition active:scale-95 cursor-pointer"
 			>
 				<FileSpreadsheet class="size-4" />
-				<span>ดาวน์โหลด CSV Dataset (สำหรับ SPSS / Excel / R)</span>
+				<span>ดาวน์โหลด CSV Dataset (Excel / SPSS / R)</span>
 			</a>
 
 			<a
+				id="btn-export-json"
 				href="/api/admin/export?format=xapi"
 				download
-				class="inline-flex items-center gap-2 rounded-xl border border-input bg-card px-4 py-2.5 text-sm font-bold text-foreground shadow-xs transition hover:bg-accent hover:text-accent-foreground"
+				class="inline-flex items-center gap-2.5 rounded-xl border border-input bg-card hover:bg-accent hover:text-accent-foreground text-foreground px-4 py-2.5 text-sm font-bold shadow-xs transition active:scale-95 cursor-pointer"
 			>
 				<FileCode class="size-4 text-blue-500" />
 				<span>ดาวน์โหลด xAPI Statements (JSON)</span>
@@ -211,17 +214,17 @@
 		</div>
 
 		<!-- Field Dictionary Note -->
-		<div class="mt-4 rounded-xl bg-background/60 p-3 text-xs text-muted-foreground border border-border/40">
-			<div class="flex items-center gap-1.5 font-semibold text-foreground mb-1">
+		<div class="mt-4 rounded-xl bg-muted/40 p-3.5 text-xs text-muted-foreground border border-border/40">
+			<div class="flex items-center gap-1.5 font-semibold text-foreground mb-1.5">
 				<Info class="size-3.5 text-emerald-600" /> โครงสร้างตัวแปรในไฟล์ CSV:
 			</div>
 			<p class="leading-relaxed">
-				<span class="font-mono text-foreground font-semibold">gop_overall</span> (คะแนนความชัดเจน), 
-				<span class="font-mono text-foreground font-semibold">per_overall</span> (อัตราความผิดพลาดหน่วยเสียง), 
-				<span class="font-mono text-foreground font-semibold">tone_score</span> (ความแม่นของเส้นเสียง), 
-				<span class="font-mono text-foreground font-semibold">listened_to_example</span> (LQ5 พฤติกรรมการฟังตัวอย่างก่อนพูด), 
-				<span class="font-mono text-foreground font-semibold">hesitation_latency_ms</span> (LQ6 ความลังเลก่อนเปล่งเสียง), 
-				และ <span class="font-mono text-foreground font-semibold">anonymized_user_id</span> (ปกปิดตัวตนตาม PDPA)
+				<span class="font-mono text-foreground font-semibold">gop_overall</span> (คะแนนความชัดเจน Goodness of Pronunciation), 
+				<span class="font-mono text-foreground font-semibold">per_overall</span> (อัตราความผิดพลาดหน่วยเสียง Phoneme Error Rate), 
+				<span class="font-mono text-foreground font-semibold">tone_score</span> (คะแนนความแม่นยำของระดับเส้นเสียง Tone Contour), 
+				<span class="font-mono text-foreground font-semibold">listened_to_example</span> (LQ5 พฤติกรรมการฟังตัวอย่างเสียงก่อนพูด), 
+				<span class="font-mono text-foreground font-semibold">attempt_number</span> (ครั้งที่พยายามออกเสียง), 
+				และ <span class="font-mono text-foreground font-semibold">anonymized_user_id</span> (รหัสผู้เข้าร่วมที่ปกปิดตัวตนตามมาตรฐาน PDPA)
 			</p>
 		</div>
 	</section>

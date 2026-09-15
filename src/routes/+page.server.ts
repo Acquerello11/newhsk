@@ -1,26 +1,43 @@
-import { getDiagnosticAnalytics } from '$lib/server/db';
-import { generateRemedialVocab, type RemedialCard } from '$lib/analytics/remedialEngine';
-import { HSK1_VOCAB_PRESETS, HSK2_VOCAB_PRESETS, HSK3_VOCAB_PRESETS } from '$lib/vocabLoader';
 import type { PageServerLoad } from './$types';
+import { getDiagnosticAnalytics } from '$lib/server/db';
+import { generateRemedialVocab, type RemedialCard, type DiagnosticSummary } from '$lib/analytics/remedialEngine';
+import { HSK1_VOCAB_PRESETS } from '$lib/vocabLoader';
 
 export const load: PageServerLoad = async ({ locals }) => {
-	const currentUserId = locals.user?.id ? String(locals.user.id) : 'usr_uuid_local';
-	const queryUserIds = Array.from(
-		new Set([currentUserId, '1', 'usr_uuid_local', 'usr_uuid_guest'].filter(Boolean))
-	);
+	const user = locals.user;
+	if (!user) {
+		return {
+			remedialCards: [] as RemedialCard[],
+			diagnosticSummary: null as DiagnosticSummary
+		};
+	}
 
 	try {
-		const diagnostic = await getDiagnosticAnalytics(queryUserIds);
-		const allVocab = [...HSK1_VOCAB_PRESETS, ...HSK2_VOCAB_PRESETS, ...HSK3_VOCAB_PRESETS];
-		const remedialCards: RemedialCard[] = generateRemedialVocab(diagnostic, allVocab, 5);
+		const diag = await getDiagnosticAnalytics(String(user.id));
+		if (!diag || !diag.hasData) {
+			return {
+				remedialCards: [] as RemedialCard[],
+				diagnosticSummary: null as DiagnosticSummary
+			};
+		}
+
+		const diagnosticSummary: DiagnosticSummary = {
+			hasData: diag.hasData,
+			weakPhonemes: diag.weakPhonemes,
+			weakTones: diag.weakTones
+		};
+
+		const remedialCards = generateRemedialVocab(diagnosticSummary, HSK1_VOCAB_PRESETS, 4);
 
 		return {
-			remedialCards
+			remedialCards,
+			diagnosticSummary
 		};
 	} catch (err) {
-		console.warn('⚠️ [Page Load] Failed to get remedial cards for home page:', err);
+		console.warn('Failed to load remedial cards for home page:', err);
 		return {
-			remedialCards: []
+			remedialCards: [] as RemedialCard[],
+			diagnosticSummary: null as DiagnosticSummary
 		};
 	}
 };

@@ -13,8 +13,8 @@ let db: Client | null = null;
 
 export function getDb(): Client | null {
 	if (db) return db;
-	const rawUrl = env.TURSO_DATABASE_URL?.trim() || process.env.TURSO_DATABASE_URL?.trim();
-	const authToken = env.TURSO_AUTH_TOKEN?.trim() || process.env.TURSO_AUTH_TOKEN?.trim();
+	const rawUrl = env.TURSO_DATABASE_URL?.trim();
+	const authToken = env.TURSO_AUTH_TOKEN?.trim();
 	const url = rawUrl || (isServerless ? '' : 'file:data/hsk.db');
 
 	if (!url) {
@@ -117,6 +117,27 @@ CREATE TABLE IF NOT EXISTS learning_events (
 	xapi_statement TEXT NOT NULL,
 	created_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS phoneme_evaluations (
+	id TEXT PRIMARY KEY,
+	user_id TEXT NOT NULL,
+	word_id TEXT NOT NULL,
+	pinyin TEXT NOT NULL,
+	phoneme TEXT NOT NULL,
+	phoneme_type TEXT NOT NULL,
+	gop REAL NOT NULL,
+	status TEXT NOT NULL,
+	target TEXT NOT NULL,
+	recognized TEXT NOT NULL,
+	created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_phoneme_eval_phoneme ON phoneme_evaluations(phoneme);
+CREATE INDEX IF NOT EXISTS idx_phoneme_eval_user ON phoneme_evaluations(user_id);
+CREATE INDEX IF NOT EXISTS idx_phoneme_eval_word ON phoneme_evaluations(word_id);
+CREATE INDEX IF NOT EXISTS idx_events_user_created ON learning_events(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_events_user_verb ON learning_events(user_id, event_type);
+CREATE INDEX IF NOT EXISTS idx_events_word ON learning_events(word_id);
 `;
 
 let initPromise: Promise<void> | null = null;
@@ -356,6 +377,7 @@ export async function completeLesson(userId: number, lessonKey: string, stars: n
 }
 
 // Admin queries
+
 export type AdminUserRow = {
 	id: number;
 	username: string;
@@ -404,6 +426,7 @@ export async function listAllCompletions(): Promise<{ userId: number; lessonKey:
 }
 
 // Mistakes & Learner Analytics
+
 export type MistakeRecord = {
 	id: number;
 	userId: number;
@@ -717,7 +740,7 @@ export async function getPronunciationPhonemeErrorStats(userId: string | string[
 
 export async function recordLearningEvent(params: {
 	userId: string;
-	eventType: string; // 'pronounced' | 'listened_to_example' | 'hesitated'
+	eventType: string; // 'pronounced' | 'listened_to_example'
 	wordId: string;
 	statementId: string;
 	xapiStatement: any;
@@ -844,7 +867,7 @@ export async function getUserConsent(
 }
 
 // -------------------------------------------------------------
-// Comprehensive Diagnostic Analytics (LQ5, LQ6, Phoneme & Tone Breakdown)
+// Comprehensive Diagnostic Analytics (Acoustic Accuracy, Tone & Phoneme Breakdown)
 // -------------------------------------------------------------
 
 export type DiagnosticAnalytics = {
@@ -864,7 +887,6 @@ export type DiagnosticAnalytics = {
 		sampleWith: number;
 		sampleWithout: number;
 	};
-	hesitationStats: { avgLatencyMs: number | null; sampleCount: number };
 	phonemeBreakdown: Array<{ phoneme: string; type: string; avgGop: number; totalAttempts: number }>;
 	frequentSubstitutions: Array<{
 		target: string;
@@ -937,8 +959,7 @@ export async function getDiagnosticAnalytics(userId: string | string[]): Promise
 				}
 			}
 
-			//แบบที่ 3: กรองแสดงเฉพาะพยัญชนะต้นจริง (เช่น /b/, /d/, /zh/, /sh/)
-			// ตัดพวกสระโค้ดตัวเลขทิ้งไปให้หมด
+			// กรองแสดงเฉพาะพยัญชนะต้นจริง (เช่น /b/, /d/, /zh/, /sh/)
 			const cleanInitial = pName.toLowerCase().replace(/[^a-z]/g, '');
 			if (VALID_INITIALS.has(cleanInitial)) {
 				// Phoneme breakdown aggregation (เฉพาะพยัญชนะต้นจริง)
@@ -968,7 +989,6 @@ export async function getDiagnosticAnalytics(userId: string | string[]): Promise
 	// LQ5 Analysis: Score with listening vs without listening
 	const pronouncedEvents = events.filter((e) => e.eventType === 'pronounced');
 	const listeningEvents = events.filter((e) => e.eventType === 'listened_to_example');
-	const hesitationEvents = events.filter((e) => e.eventType === 'hesitated');
 
 	const listenedScores: number[] = [];
 	const notListenedScores: number[] = [];
@@ -993,15 +1013,6 @@ export async function getDiagnosticAnalytics(userId: string | string[]): Promise
 	const scoreDelta =
 		withListeningAvg !== null && withoutListeningAvg !== null
 			? Number((withListeningAvg - withoutListeningAvg).toFixed(1))
-			: null;
-
-	// LQ6 Analysis: Hesitation latency breakdown
-	const hesitationLatencies = hesitationEvents
-		.map((h) => Number(h.xapiStatement?.result?.extensions?.['https://hsk.app/xapi/ext/hesitation-latency-ms'] ?? 0))
-		.filter((lat) => lat > 0);
-	const avgHesitationMs =
-		hesitationLatencies.length > 0
-			? Math.round(hesitationLatencies.reduce((a, b) => a + b, 0) / hesitationLatencies.length)
 			: null;
 
 	// Phoneme breakdown, sorted weakest first
@@ -1062,7 +1073,6 @@ export async function getDiagnosticAnalytics(userId: string | string[]): Promise
 			sampleWith: listenedScores.length,
 			sampleWithout: notListenedScores.length
 		},
-		hesitationStats: { avgLatencyMs: avgHesitationMs, sampleCount: hesitationLatencies.length },
 		phonemeBreakdown,
 		frequentSubstitutions,
 		weakPhonemes,
@@ -1071,7 +1081,7 @@ export async function getDiagnosticAnalytics(userId: string | string[]): Promise
 }
 
 // -------------------------------------------------------------
-// Research Data Export (LQ1-LQ8 & IEEE 9274.1.1 xAPI Telemetry)
+// Research Data Export (IEEE 9274.1.1 xAPI Telemetry & Acoustic Metrics)
 // -------------------------------------------------------------
 
 /**
@@ -1101,7 +1111,6 @@ export type ExportableEvaluationRecord = {
 	audioDurationSec: number;
 	listenedToExample: boolean;
 	exampleListenCount: number;
-	hesitationLatencyMs: number | null;
 	phonemeErrorsSummary: string;
 };
 
@@ -1131,7 +1140,6 @@ export async function getAllPronunciationEvaluationsForExport(limit = 10000): Pr
 		let detectedTone: number | null = null;
 		let listenedToExample = false;
 		let exampleListenCount = 0;
-		let hesitationLatencyMs: number | null = null;
 		const errorItems: string[] = [];
 
 		for (const d of phonemeDetails) {
@@ -1146,9 +1154,6 @@ export async function getAllPronunciationEvaluationsForExport(limit = 10000): Pr
 			}
 			if (d.exampleListenCount !== undefined) {
 				exampleListenCount = Number(d.exampleListenCount);
-			}
-			if (d.hesitationLatencyMs !== undefined) {
-				hesitationLatencyMs = Number(d.hesitationLatencyMs);
 			}
 			if (d.status === 'substitution' && d.target && d.recognized) {
 				errorItems.push(`${d.target}->${d.recognized}`);
@@ -1174,7 +1179,6 @@ export async function getAllPronunciationEvaluationsForExport(limit = 10000): Pr
 			audioDurationSec: Number(r.audio_duration_sec),
 			listenedToExample,
 			exampleListenCount,
-			hesitationLatencyMs,
 			phonemeErrorsSummary: errorItems.join(';')
 		};
 	});
@@ -1245,4 +1249,130 @@ export async function getResearchExportStats(): Promise<{
 		return { totalEvaluations: 0, totalEvents: 0, totalParticipants: 0 };
 	}
 }
+
+// -------------------------------------------------------------
+// Detailed Phoneme Breakdown Operations (Turso DB)
+// -------------------------------------------------------------
+
+export type PhonemeEvaluationRecord = {
+	id: string;
+	userId: string;
+	wordId: string;
+	pinyin: string;
+	phoneme: string;
+	phonemeType: string;
+	gop: number;
+	status: string;
+	target: string;
+	recognized: string;
+	createdAt: number;
+};
+
+export async function recordPhonemeEvaluations(
+	items: Array<{
+		id?: string;
+		userId: string;
+		wordId: string;
+		pinyin: string;
+		phoneme: string;
+		phonemeType: string;
+		gop: number;
+		status: string;
+		target: string;
+		recognized: string;
+		createdAt?: number;
+	}>
+): Promise<void> {
+	const client = getDb();
+	if (!client || items.length === 0) return;
+	await init();
+
+	for (const item of items) {
+		const id = item.id || randomBytes(16).toString('hex');
+		const now = item.createdAt || Date.now();
+		await client.execute({
+			sql: `INSERT INTO phoneme_evaluations 
+			      (id, user_id, word_id, pinyin, phoneme, phoneme_type, gop, status, target, recognized, created_at)
+			      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			args: [
+				id,
+				String(item.userId),
+				String(item.wordId),
+				String(item.pinyin),
+				String(item.phoneme),
+				String(item.phonemeType),
+				Number(item.gop),
+				String(item.status),
+				String(item.target),
+				String(item.recognized),
+				now
+			]
+		});
+	}
+}
+
+export async function getPhonemeEvaluations(
+	userId: string | string[],
+	limit = 100
+): Promise<PhonemeEvaluationRecord[]> {
+	const client = getDb();
+	if (!client) return [];
+	await init();
+
+	const userIds = Array.isArray(userId) ? userId : [userId];
+	if (userIds.length === 0) return [];
+	const placeholders = userIds.map(() => '?').join(',');
+
+	const result = await client.execute({
+		sql: `SELECT id, user_id, word_id, pinyin, phoneme, phoneme_type, gop, status, target, recognized, created_at
+		      FROM phoneme_evaluations
+		      WHERE user_id IN (${placeholders})
+		      ORDER BY created_at DESC
+		      LIMIT ?`,
+		args: [...userIds.map(String), limit]
+	});
+
+	return result.rows.map((r) => ({
+		id: String(r.id),
+		userId: String(r.user_id),
+		wordId: String(r.word_id),
+		pinyin: String(r.pinyin),
+		phoneme: String(r.phoneme),
+		phonemeType: String(r.phoneme_type),
+		gop: Number(r.gop),
+		status: String(r.status),
+		target: String(r.target),
+		recognized: String(r.recognized),
+		createdAt: Number(r.created_at)
+	}));
+}
+
+export async function getAllTablesSummary(): Promise<Array<{ tableName: string; count: number }>> {
+	const client = getDb();
+	if (!client) return [];
+	await init();
+
+	const tablesResult = await client.execute(
+		"SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+	);
+
+	const summary: Array<{ tableName: string; count: number }> = [];
+	for (const row of tablesResult.rows) {
+		const name = String(row.name);
+		try {
+			const countRes = await client.execute(`SELECT COUNT(*) as count FROM ${name}`);
+			summary.push({
+				tableName: name,
+				count: Number(countRes.rows[0]?.count ?? 0)
+			});
+		} catch {
+			summary.push({ tableName: name, count: 0 });
+		}
+	}
+
+	return summary;
+}
+
+
+
 

@@ -17,10 +17,10 @@ function escapeCsvField(val: any): string {
 export const GET: RequestHandler = async ({ locals, url }) => {
 	// Security check: Only authenticated administrators can export research datasets
 	if (!locals.user) {
-		throw error(401, 'Unauthorized: Please log in as an administrator.');
+		throw error(401, 'Unauthorized: กรุณาเข้าสู่ระบบในฐานะผู้ดูแลระบบก่อนดาวน์โหลดข้อมูล');
 	}
 	if (!locals.user.isAdmin) {
-		throw error(403, 'Forbidden: Admin privileges required to export research data.');
+		throw error(403, 'Forbidden: บัญชีของคุณไม่มีสิทธิ์ผู้ดูแลระบบ (Admin) ในการส่งออกข้อมูลวิจัย');
 	}
 
 	const format = url.searchParams.get('format')?.toLowerCase() || 'csv';
@@ -61,7 +61,6 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 		'audio_duration_sec',
 		'listened_to_example',
 		'example_listen_count',
-		'hesitation_latency_ms',
 		'phoneme_errors_summary'
 	];
 
@@ -84,7 +83,6 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 			escapeCsvField(r.audioDurationSec.toFixed(2)),
 			escapeCsvField(r.listenedToExample ? 1 : 0),
 			escapeCsvField(r.exampleListenCount),
-			escapeCsvField(r.hesitationLatencyMs ?? ''),
 			escapeCsvField(r.phonemeErrorsSummary)
 		];
 		csvRows.push(row.join(','));
