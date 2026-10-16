@@ -87,9 +87,21 @@ export const POST = async ({ locals, request }: RequestEvent) => {
 		const pinyin = String(item.pinyin || '');
 		const attemptNumber = Number(item.attempt_number || 1);
 		const audioDurationSec = Number(item.audio_duration_sec || 0);
+		const practiceMode = item.practice_mode === 'stage' || item.practice_mode === 'word'
+			? item.practice_mode
+			: item.practiceMode === 'stage' || item.practiceMode === 'word'
+				? item.practiceMode
+				: 'unknown';
+		const rawStageId = item.stage_id ?? item.stageId;
+		const stageId = typeof rawStageId === 'string' && /^[a-zA-Z0-9_-]{2,64}$/.test(rawStageId)
+			? rawStageId
+			: null;
 
 		if (!wordId || !pinyin) {
 			continue;
+		}
+		if (practiceMode === 'stage' && !stageId) {
+			throw error(400, 'Stage practice evaluations must include a valid stage_id.');
 		}
 
 		const phonemeDetails: PhonemeDetail[] = Array.isArray(item.scores?.phoneme_details)
@@ -119,6 +131,8 @@ export const POST = async ({ locals, request }: RequestEvent) => {
 			user_id: userId || 'anonymous',
 			word_id: wordId,
 			pinyin,
+			practice_mode: practiceMode,
+			stage_id: stageId,
 			attempt_number: attemptNumber,
 			audio_duration_sec: Number(audioDurationSec.toFixed(2)),
 			scores: {
@@ -143,7 +157,9 @@ export const POST = async ({ locals, request }: RequestEvent) => {
 					gop: pd.gop,
 					status: pd.status,
 					target: pd.target,
-					recognized: pd.recognized
+					recognized: pd.recognized,
+					practiceMode,
+					stageId
 				}))
 			);
 		}

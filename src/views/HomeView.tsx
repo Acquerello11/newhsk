@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import {
-  Heart,
   Zap,
   Flame,
   TrendingUp,
@@ -31,7 +30,7 @@ interface HomeViewProps {
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({ onNavigate }) => {
-  const { xp, hearts, streak, completed, wordStats } = useProgress();
+  const { xp, streak, completed, wordStats } = useProgress();
   const [selectedLevel, setSelectedLevel] = useState<number>(1);
 
   const filteredStages = ALL_QUEST_STAGES.filter((s) => s.hskLevel === selectedLevel);
@@ -71,10 +70,6 @@ export const HomeView: React.FC<HomeViewProps> = ({ onNavigate }) => {
     <main className="mx-auto max-w-xl px-4 pb-28 pt-4">
       {/* Top Quick Status Bar */}
       <div className="mb-6 flex items-center justify-around rounded-2xl border border-border bg-card/90 px-4 py-3 shadow-xs">
-        <div className="flex items-center gap-1.5 font-black text-rose-500">
-          <Heart className="size-5 fill-rose-500" />
-          <span>{hearts} / 5</span>
-        </div>
         <div className="flex items-center gap-1.5 font-black text-amber-500">
           <Zap className="size-5 fill-amber-400" />
           <span>{xp} XP</span>

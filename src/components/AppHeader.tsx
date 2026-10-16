@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import {
   Flame,
   Zap,
-  Heart,
   Settings as SettingsIcon,
   ArrowLeft,
   User,
@@ -31,7 +30,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   currentRoute = 'home',
   navigate
 }) => {
-  const { streak, xp, hearts } = useProgress();
+  const { streak, xp } = useProgress();
   const { apiKey, modelId, user, setApiKey, setModelId } = useSettings();
 
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -153,14 +152,6 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
               <Zap className="size-4 fill-amber-400" />
               <span>{xp}</span>
             </div>
-            <div
-              className="flex items-center gap-1 text-rose-500 bg-rose-500/10 px-2 py-1 rounded-full"
-              title="หัวใจ (พลังงานฝึกฝน)"
-            >
-              <Heart className="size-4 fill-rose-500" />
-              <span>{hearts}</span>
-            </div>
-
             <button
               type="button"
               onClick={openSettings}

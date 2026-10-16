@@ -88,7 +88,6 @@
 				correctCount += 1;
 				progress.addXp(10);
 			} else {
-				progress.loseHeart();
 				fetch('/api/mistakes', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
@@ -114,7 +113,6 @@
 						: `Error: ${msg}`;
 			score = 0;
 			status = 'incorrect';
-			progress.loseHeart();
 			fetch('/api/mistakes', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },

@@ -3,7 +3,7 @@
 import { env } from '$env/dynamic/private';
 
 function getNeonConfig() {
-	const dbUrl = env.DATABASE_URL?.trim();
+	const dbUrl = (env.DATABASE_URL || process.env.DATABASE_URL)?.trim();
 	if (!dbUrl) return null;
 
 	try {
@@ -211,6 +211,235 @@ export async function getNeonAuditLogs(limit = 50): Promise<Array<{
 	}));
 }
 
+let pronunciationEvaluationSchemaReady: Promise<void> | null = null;
+
+async function executeNeonQueryOrThrow<T = any>(query: string): Promise<T[]> {
+	const cfg = getNeonConfig();
+	if (!cfg) throw new Error('DATABASE_URL is not configured.');
+
+	const res = await fetch(cfg.endpoint, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			'Neon-Connection-String': cfg.connectionString
+		},
+		body: JSON.stringify({ query }),
+		signal: AbortSignal.timeout(6000)
+	});
+	if (!res.ok) {
+		throw new Error(`Neon query failed with HTTP ${res.status}`);
+	}
+
+	const data = await res.json();
+	return (data.rows || []) as T[];
+}
+
+async function ensurePronunciationEvaluationSchema(): Promise<void> {
+	if (!pronunciationEvaluationSchemaReady) {
+		pronunciationEvaluationSchemaReady = (async () => {
+			await executeNeonQueryOrThrow(`
+				CREATE TABLE IF NOT EXISTS pronunciation_evaluations (
+					evaluation_id TEXT PRIMARY KEY,
+					user_id TEXT NOT NULL,
+					word_id TEXT NOT NULL,
+					pinyin TEXT NOT NULL,
+					attempt_number INTEGER NOT NULL DEFAULT 1,
+					audio_duration_sec DOUBLE PRECISION NOT NULL DEFAULT 0,
+					gop_overall DOUBLE PRECISION NOT NULL DEFAULT 0,
+					per_overall DOUBLE PRECISION NOT NULL DEFAULT 0,
+					tone_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+					phoneme_details JSONB NOT NULL DEFAULT '[]'::jsonb,
+					practice_mode TEXT NOT NULL DEFAULT 'unknown'
+						CHECK (practice_mode IN ('word', 'stage', 'unknown')),
+					stage_id TEXT,
+					created_at BIGINT NOT NULL
+				)
+			`);
+			await executeNeonQueryOrThrow(`
+				CREATE INDEX IF NOT EXISTS idx_neon_pronunciation_evaluations_user
+				ON pronunciation_evaluations(user_id)
+			`);
+			await executeNeonQueryOrThrow(`
+				CREATE INDEX IF NOT EXISTS idx_neon_pronunciation_evaluations_mode_created
+				ON pronunciation_evaluations(practice_mode, created_at)
+			`);
+		})().catch((err) => {
+			pronunciationEvaluationSchemaReady = null;
+			throw err;
+		});
+	}
+	await pronunciationEvaluationSchemaReady;
+}
+
+export async function recordNeonPronunciationEvaluation(params: {
+	evaluationId: string;
+	userId: string;
+	wordId: string;
+	pinyin: string;
+	attemptNumber: number;
+	audioDurationSec: number;
+	gopOverall: number;
+	perOverall: number;
+	toneScore: number;
+	phonemeDetails: unknown[];
+	practiceMode: 'stage' | 'word' | 'unknown';
+	stageId: string | null;
+	createdAt: number;
+}): Promise<boolean> {
+	if (!getNeonConfig()) return false;
+	if (params.practiceMode === 'stage' && !params.stageId) {
+		throw new Error('Neon Quest evaluation requires a stage ID.');
+	}
+
+	await ensurePronunciationEvaluationSchema();
+	const text = (value: string) => `'${value.replace(/'/g, "''")}'`;
+	const numeric = (value: number) => (Number.isFinite(value) ? value : 0);
+	const stageId = params.stageId ? text(params.stageId) : 'NULL';
+	const details = `${text(JSON.stringify(params.phonemeDetails))}::jsonb`;
+	await executeNeonQueryOrThrow(`
+		INSERT INTO pronunciation_evaluations (
+			evaluation_id, user_id, word_id, pinyin, attempt_number, audio_duration_sec,
+			gop_overall, per_overall, tone_score, phoneme_details, practice_mode, stage_id, created_at
+		) VALUES (
+			${text(params.evaluationId)}, ${text(params.userId)}, ${text(params.wordId)}, ${text(params.pinyin)},
+			${Math.max(1, Math.trunc(numeric(params.attemptNumber)))}, ${numeric(params.audioDurationSec)},
+			${numeric(params.gopOverall)}, ${numeric(params.perOverall)}, ${numeric(params.toneScore)},
+			${details}, ${text(params.practiceMode)}, ${stageId}, ${Math.trunc(numeric(params.createdAt))}
+		)
+		ON CONFLICT (evaluation_id) DO NOTHING
+	`);
+	return true;
+}
+
+export async function recordNeonLearningEvent(params: {
+	userId: string;
+	eventType: string;
+	wordId: string;
+	statementId: string;
+	xapiStatement: unknown;
+	practiceMode: 'stage' | 'word' | 'unknown';
+	stageId: string | null;
+	createdAt: number;
+}): Promise<void> {
+	if (!getNeonConfig()) return;
+	if (params.practiceMode === 'stage' && !params.stageId) {
+		throw new Error('Neon Quest event requires a stage ID.');
+	}
+	await ensureAppLearningEventSchema();
+	const text = (value: string) => `'${value.replace(/'/g, "''")}'`;
+	const stageId = params.stageId ? text(params.stageId) : 'NULL';
+	await executeNeonQueryOrThrow(`
+		INSERT INTO app_learning_events (
+			statement_id, user_id, event_type, word_id, xapi_statement, practice_mode, stage_id, created_at
+		) VALUES (
+			${text(params.statementId)}, ${text(params.userId)}, ${text(params.eventType)}, ${text(params.wordId)},
+			${text(JSON.stringify(params.xapiStatement))}::jsonb, ${text(params.practiceMode)}, ${stageId}, ${Math.trunc(params.createdAt)}
+		)
+		ON CONFLICT (statement_id) DO UPDATE SET
+			xapi_statement = EXCLUDED.xapi_statement,
+			practice_mode = EXCLUDED.practice_mode,
+			stage_id = EXCLUDED.stage_id
+	`);
+}
+
+export async function recordNeonPhonemeEvaluation(params: {
+	id: string;
+	userId: string;
+	wordId: string;
+	pinyin: string;
+	phoneme: string;
+	phonemeType: string;
+	gop: number;
+	status: string;
+	target: string;
+	recognized: string;
+	practiceMode: 'stage' | 'word' | 'unknown';
+	stageId: string | null;
+	createdAt: number;
+}): Promise<void> {
+	if (!getNeonConfig()) return;
+	if (params.practiceMode === 'stage' && !params.stageId) {
+		throw new Error('Neon Quest phoneme evaluation requires a stage ID.');
+	}
+	await ensureNeonPhonemeEvaluationSchema();
+	const text = (value: string) => `'${value.replace(/'/g, "''")}'`;
+	const numeric = (value: number) => (Number.isFinite(value) ? value : 0);
+	const stageId = params.stageId ? text(params.stageId) : 'NULL';
+	await executeNeonQueryOrThrow(`
+		INSERT INTO phoneme_evaluations (
+			id, source_record_id, user_id, word_id, pinyin, phoneme, phoneme_type, gop,
+			status, target, recognized, practice_mode, stage_id, created_at
+		) VALUES (
+			gen_random_uuid(), ${text(params.id)}, ${text(params.userId)}, ${text(params.wordId)},
+			${text(params.pinyin)}, ${text(params.phoneme)}, ${text(params.phonemeType)}, ${numeric(params.gop)},
+			${text(params.status)}, ${text(params.target)}, ${text(params.recognized)},
+			${text(params.practiceMode)}, ${stageId}, to_timestamp(${Math.trunc(numeric(params.createdAt))} / 1000.0)
+		)
+		ON CONFLICT (source_record_id) DO NOTHING
+	`);
+}
+
+let appLearningEventSchemaReady: Promise<void> | null = null;
+
+function ensureAppLearningEventSchema(): Promise<void> {
+	if (!appLearningEventSchemaReady) {
+		appLearningEventSchemaReady = executeNeonQueryOrThrow(`
+			CREATE TABLE IF NOT EXISTS app_learning_events (
+				statement_id TEXT PRIMARY KEY,
+				user_id TEXT NOT NULL,
+				event_type TEXT NOT NULL,
+				word_id TEXT NOT NULL,
+				xapi_statement JSONB NOT NULL,
+				practice_mode TEXT NOT NULL DEFAULT 'unknown'
+					CHECK (practice_mode IN ('word', 'stage', 'unknown')),
+				stage_id TEXT,
+				created_at BIGINT NOT NULL
+			)
+		`).then(() => undefined).catch((err) => {
+			appLearningEventSchemaReady = null;
+			throw err;
+		});
+	}
+	return appLearningEventSchemaReady;
+}
+
+let neonPhonemeEvaluationSchemaReady: Promise<void> | null = null;
+
+function ensureNeonPhonemeEvaluationSchema(): Promise<void> {
+	if (!neonPhonemeEvaluationSchemaReady) {
+		neonPhonemeEvaluationSchemaReady = (async () => {
+			await executeNeonQueryOrThrow(
+				'ALTER TABLE phoneme_evaluations ADD COLUMN IF NOT EXISTS source_record_id TEXT'
+			);
+			await executeNeonQueryOrThrow(
+				"ALTER TABLE phoneme_evaluations ADD COLUMN IF NOT EXISTS practice_mode TEXT NOT NULL DEFAULT 'unknown'"
+			);
+			await executeNeonQueryOrThrow(
+				'ALTER TABLE phoneme_evaluations ADD COLUMN IF NOT EXISTS stage_id TEXT'
+			);
+			await executeNeonQueryOrThrow(
+				'CREATE UNIQUE INDEX IF NOT EXISTS idx_neon_phoneme_source_record ON phoneme_evaluations(source_record_id)'
+			);
+		})().catch((err) => {
+			neonPhonemeEvaluationSchemaReady = null;
+			throw err;
+		});
+	}
+	return neonPhonemeEvaluationSchemaReady;
+}
+
+let stageContentSchemaReady: Promise<void> | null = null;
+
+function ensureNeonStageContentSchema(): Promise<void> {
+	if (!stageContentSchemaReady) {
+		stageContentSchemaReady = (async () => {
+			await executeNeonQuery('ALTER TABLE stage_overrides ADD COLUMN IF NOT EXISTS custom_words TEXT;');
+			await executeNeonQuery('ALTER TABLE stage_overrides ADD COLUMN IF NOT EXISTS content_json TEXT;');
+		})();
+	}
+	return stageContentSchemaReady;
+}
+
 /**
  * Fetches stage overrides from Neon DB
  */
@@ -219,11 +448,13 @@ export async function getNeonStageOverrides(): Promise<Record<string, {
 	category?: string;
 	description?: string;
 	isActive: boolean;
+	contentJson?: string;
 	updatedBy?: string;
 	updatedAt?: string;
 }>> {
+	await ensureNeonStageContentSchema();
 	const query = `
-		SELECT stage_id, title, category, description, is_active, updated_by, updated_at
+		SELECT stage_id, title, category, description, is_active, content_json, updated_by, updated_at
 		FROM stage_overrides;
 	`;
 
@@ -235,6 +466,7 @@ export async function getNeonStageOverrides(): Promise<Record<string, {
 			category: r.category,
 			description: r.description,
 			isActive: r.is_active ?? true,
+			contentJson: r.content_json ?? undefined,
 			updatedBy: r.updated_by,
 			updatedAt: r.updated_at
 		};
@@ -251,23 +483,27 @@ export async function saveNeonStageOverride(params: {
 	category: string;
 	description: string;
 	isActive: boolean;
+	contentJson?: string;
 	updatedBy: string;
 }) {
+	await ensureNeonStageContentSchema();
 	const safeId = params.stageId.replace(/'/g, "''");
 	const safeTitle = params.title.replace(/'/g, "''");
 	const safeCat = params.category.replace(/'/g, "''");
 	const safeDesc = params.description.replace(/'/g, "''");
+	const safeContent = (params.contentJson ?? '').replace(/'/g, "''");
 	const safeUser = params.updatedBy.replace(/'/g, "''");
 	const isActive = params.isActive ? 'TRUE' : 'FALSE';
 
 	const query = `
-		INSERT INTO stage_overrides (stage_id, title, category, description, is_active, updated_by, updated_at)
-		VALUES ('${safeId}', '${safeTitle}', '${safeCat}', '${safeDesc}', ${isActive}, '${safeUser}', CURRENT_TIMESTAMP)
+		INSERT INTO stage_overrides (stage_id, title, category, description, is_active, content_json, updated_by, updated_at)
+		VALUES ('${safeId}', '${safeTitle}', '${safeCat}', '${safeDesc}', ${isActive}, '${safeContent}', '${safeUser}', CURRENT_TIMESTAMP)
 		ON CONFLICT (stage_id) DO UPDATE SET
 			title = EXCLUDED.title,
 			category = EXCLUDED.category,
 			description = EXCLUDED.description,
 			is_active = EXCLUDED.is_active,
+			content_json = EXCLUDED.content_json,
 			updated_by = EXCLUDED.updated_by,
 			updated_at = CURRENT_TIMESTAMP;
 	`;

@@ -3,7 +3,6 @@
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import { 
 		Star, 
-		Heart, 
 		Zap, 
 		BookOpen, 
 		Flame, 
@@ -35,7 +34,7 @@
 	let { data } = $props();
 
 	let selectedLevel = $state<number>(1);
-	const filteredStages = $derived(ALL_QUEST_STAGES.filter((s) => s.hskLevel === selectedLevel));
+	const filteredStages = $derived((data.stages ?? ALL_QUEST_STAGES).filter((s: QuestStage) => s.hskLevel === selectedLevel));
 
 	// จับคู่รูปไอคอนตามหมวดหมู่เนื้อหาของแต่ละด่าน
 	function getStageIcon(stage: QuestStage) {
@@ -63,10 +62,6 @@
 <main class="mx-auto max-w-lg px-4 pb-32 pt-6">
 	<!-- Top Stats Bar -->
 	<div class="sticky top-0 z-10 -mx-4 mb-6 flex items-center justify-around bg-background/80 px-4 py-3 backdrop-blur-md border-b">
-		<div class="flex items-center gap-1.5 font-bold text-red-500">
-			<Heart class="size-5 fill-red-500" />
-			<span>{progress.hearts}</span>
-		</div>
 		<div class="flex items-center gap-1.5 font-bold text-blue-500">
 			<Zap class="size-5 fill-blue-500" />
 			<span>{progress.xp} XP</span>

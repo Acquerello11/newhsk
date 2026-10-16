@@ -49,6 +49,8 @@ export type VocabItemMastery = {
 	lastPracticed?: number;
 	questAttempts: number;
 	pitchAttempts: number;
+	questAvgScore: number | null;
+	pitchAvgScore: number | null;
 };
 
 export type HskLevelSummary = {
@@ -79,7 +81,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 
 	// Fetch historical diagnostic data & evaluations (up to 1,000 recent evaluations for full coverage analysis)
 	const [diagnosticData, topMistakes, recentMistakes, mistakeStats, learningEvents, evaluations] = await Promise.all([
-		getDiagnosticAnalytics(queryUserIds),
+		getDiagnosticAnalytics(queryUserIds, 'word'),
 		locals.user ? getTopMistakes(locals.user.id, 15) : Promise.resolve([]),
 		locals.user ? getUserMistakes(locals.user.id, 20) : Promise.resolve([]),
 		locals.user ? getMistakeStats(locals.user.id) : Promise.resolve({ totalMistakes: 0, uniqueWords: 0, toneErrors: {} }),
@@ -89,41 +91,42 @@ export const load: PageServerLoad = async ({ locals }) => {
 
 	// Build map of word evaluation statistics
 	const wordStatsMap = new Map<string, {
-		attempts: number;
-		totalScore: number;
-		bestScore: number;
 		lastPracticed: number;
 		questAttempts: number;
+		questScoreTotal: number;
 		pitchAttempts: number;
+		pitchScoreTotal: number;
+		pitchBestScore: number;
+		unclassifiedAttempts: number;
 	}>();
 
 	for (const ev of evaluations) {
 		const key = normalizeWordId(ev.word_id);
 		if (!key) continue;
 		const score = ev.scores.gop_overall;
-		const details = ev.scores.phoneme_details || [];
-		const explicitMode = details[0]?.mode;
-		const isPitch = explicitMode ? explicitMode === 'free_pitch' : true;
 
 		const existing = wordStatsMap.get(key);
 		if (!existing) {
 			wordStatsMap.set(key, {
-				attempts: 1,
-				totalScore: score,
-				bestScore: score,
 				lastPracticed: ev.created_at,
-				questAttempts: isPitch ? 0 : 1,
-				pitchAttempts: isPitch ? 1 : 0
+				questAttempts: ev.practice_mode === 'stage' ? 1 : 0,
+				questScoreTotal: ev.practice_mode === 'stage' ? score : 0,
+				pitchAttempts: ev.practice_mode === 'word' ? 1 : 0,
+				pitchScoreTotal: ev.practice_mode === 'word' ? score : 0,
+				pitchBestScore: ev.practice_mode === 'word' ? score : 0,
+				unclassifiedAttempts: ev.practice_mode === 'unknown' ? 1 : 0
 			});
 		} else {
-			existing.attempts++;
-			existing.totalScore += score;
-			existing.bestScore = Math.max(existing.bestScore, score);
 			existing.lastPracticed = Math.max(existing.lastPracticed, ev.created_at);
-			if (isPitch) {
+			if (ev.practice_mode === 'word') {
 				existing.pitchAttempts++;
-			} else {
+				existing.pitchScoreTotal += score;
+				existing.pitchBestScore = Math.max(existing.pitchBestScore, score);
+			} else if (ev.practice_mode === 'stage') {
 				existing.questAttempts++;
+				existing.questScoreTotal += score;
+			} else {
+				existing.unclassifiedAttempts++;
 			}
 		}
 	}
@@ -131,9 +134,9 @@ export const load: PageServerLoad = async ({ locals }) => {
 	function processLevelWords(presets: TonePreset[], level: 1 | 2 | 3): VocabItemMastery[] {
 		return presets.map((p) => {
 			const stat = wordStatsMap.get(p.hanzi);
-			const attempts = stat?.attempts ?? 0;
-			const avgScore = attempts > 0 ? Math.round(stat!.totalScore / attempts) : null;
-			const bestScore = stat?.bestScore ?? null;
+			const attempts = stat?.pitchAttempts ?? 0;
+			const avgScore = attempts > 0 ? Math.round(stat!.pitchScoreTotal / attempts) : null;
+			const bestScore = attempts > 0 ? stat!.pitchBestScore : null;
 
 			let status: WordMasteryStatus = 'unpracticed';
 			if (attempts > 0) {
@@ -155,7 +158,9 @@ export const load: PageServerLoad = async ({ locals }) => {
 				status,
 				lastPracticed: stat?.lastPracticed,
 				questAttempts: stat?.questAttempts ?? 0,
-				pitchAttempts: stat?.pitchAttempts ?? 0
+				pitchAttempts: stat?.pitchAttempts ?? 0,
+				questAvgScore: stat?.questAttempts ? Math.round(stat.questScoreTotal / stat.questAttempts) : null,
+				pitchAvgScore: stat?.pitchAttempts ? Math.round(stat.pitchScoreTotal / stat.pitchAttempts) : null
 			};
 		});
 	}
@@ -264,6 +269,14 @@ export const load: PageServerLoad = async ({ locals }) => {
 	// Overall articulation guides based on all mistake words across all levels
 	const allWords = [...hsk1Summary.words, ...hsk2Summary.words, ...hsk3Summary.words];
 	const overallArticulationGuides = generateMistakeArticulationGuides(allWords, 4);
+	const allWordStats = [...wordStatsMap.values()];
+	const practiceOverview = {
+		pitchAttempts: allWordStats.reduce((sum, stat) => sum + stat.pitchAttempts, 0),
+		pitchWords: allWordStats.filter((stat) => stat.pitchAttempts > 0).length,
+		questAttempts: allWordStats.reduce((sum, stat) => sum + stat.questAttempts, 0),
+		questWords: allWordStats.filter((stat) => stat.questAttempts > 0).length,
+		unclassifiedAttempts: allWordStats.reduce((sum, stat) => sum + stat.unclassifiedAttempts, 0)
+	};
 
 	return {
 		user: locals.user || null,
@@ -278,6 +291,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 		},
 		overallRemedialCards,
 		overallArticulationGuides,
+		practiceOverview,
 		topMistakes,
 		recentMistakes,
 		mistakeStats,

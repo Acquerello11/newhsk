@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Flame, Heart, Zap, Settings as SettingsIcon, ArrowLeft, LogIn, LogOut, User, Shield, BarChart2 } from '@lucide/svelte';
+	import { Flame, Zap, Settings as SettingsIcon, ArrowLeft, LogIn, LogOut, User, Shield, BarChart2 } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { progress } from '$lib/progress.svelte';
 	import { apiKey } from '$lib/apiKey.svelte';
@@ -52,10 +52,6 @@
 			<span class="flex items-center gap-1 text-yellow-500">
 				<Zap class="size-4 fill-yellow-400" />
 				{progress.xp}
-			</span>
-			<span class="flex items-center gap-1 text-rose-500">
-				<Heart class="size-4 fill-rose-500" />
-				{progress.hearts}
 			</span>
 			<Button variant="ghost" size="icon" onclick={openSettings} aria-label="Settings">
 				<SettingsIcon class="size-5" />

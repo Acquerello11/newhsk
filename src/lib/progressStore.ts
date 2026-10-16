@@ -120,11 +120,7 @@ export const progressStore = {
   },
 
   loseHeart() {
-    currentState = {
-      ...currentState,
-      hearts: Math.max(0, currentState.hearts - 1)
-    };
-    notify();
+    // Kept as a compatibility method; practice is no longer limited by hearts.
   },
 
   refillHearts() {

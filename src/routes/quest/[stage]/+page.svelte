@@ -1,18 +1,17 @@
 <script lang="ts">
-	import { page } from '$app/stores';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import { progress } from '$lib/progress.svelte';
-	import { QUEST_STAGE_MAP, type QuestStage, type Challenge } from '$lib/data/questLevels';
+	import type { QuestStage, Challenge } from '$lib/data/questLevels';
 	import { 
 		RealtimePitchTracker, 
 		analyzeMultiSyllableToneContour, 
 		type PitchPoint 
 	} from '$lib/pitch';
 	import { predictToneNeuralNetwork } from '$lib/onnxTonePredictor';
-	import { Heart, Mic, CheckCircle2, AlertCircle, Sparkles, X, Volume2, ArrowRight } from '@lucide/svelte';
+	import { Mic, CheckCircle2, AlertCircle, Sparkles, X, Volume2, ArrowRight } from '@lucide/svelte';
 	import { 
 		speak, 
 		createRecognizer, 
@@ -22,8 +21,9 @@
 		type SentenceVerificationResult
 	} from '$lib/speech';
 
-	const stageId = $page.params.stage || '';
-	const stageData: QuestStage | undefined = QUEST_STAGE_MAP.get(stageId);
+	let { data } = $props();
+	const stageData: QuestStage | undefined = data.stage;
+	const stageId = stageData?.id || '';
 
 	let currentIndex = $state(0);
 	let isRecording = $state(false);
@@ -134,10 +134,7 @@
 			} else {
 				feedbackType = 'error';
 				feedbackMessage = 'ผิด! คำแปลที่ถูกคือ: ' + currentChallenge.word.thai;
-				progress.loseHeart();
-				if (!checkGameOver()) {
-					setTimeout(nextChallenge, 2500);
-				}
+				setTimeout(nextChallenge, 2500);
 			}
 		}
 	}
@@ -294,12 +291,9 @@
 				} else {
 					feedbackType = 'error';
 					feedbackMessage = sentenceRes.feedback;
-					progress.loseHeart();
-					if (!checkGameOver()) {
-						setTimeout(() => {
-							feedbackType = 'none';
-						}, 2500);
-					}
+					setTimeout(() => {
+						feedbackType = 'none';
+					}, 2500);
 				}
 				return;
 			}
@@ -345,12 +339,9 @@
 				} else {
 					feedbackMessage = 'ยังไม่พบเสียงคำศัพท์ กรุณาออกเสียงให้ชัดเจน';
 				}
-				progress.loseHeart();
-				if (!checkGameOver()) {
-					setTimeout(() => {
-						feedbackType = 'none';
-					}, 2200);
-				}
+				setTimeout(() => {
+					feedbackType = 'none';
+				}, 2200);
 				return;
 			}
 
@@ -359,6 +350,8 @@
 			const telemetryPayload = {
 				eventType: 'pronunciation_evaluation',
 				timestamp: new Date().toISOString(),
+				practiceMode: 'stage',
+				stageId,
 				word: {
 					id: currentChallenge.word.hanzi,
 					hanzi: currentChallenge.word.hanzi,
@@ -429,12 +422,9 @@
 
 				feedbackType = 'error';
 				feedbackMessage = `ยังไม่ตรง (ได้ยิน: "${finalHeard || '-'}") ลองใหม่`;
-				progress.loseHeart();
-				if (!checkGameOver()) {
-					setTimeout(() => {
-						feedbackType = 'none';
-					}, 2000);
-				}
+				setTimeout(() => {
+					feedbackType = 'none';
+				}, 2000);
 			}
 		} else {
 			feedbackType = 'error';
@@ -443,15 +433,6 @@
 				feedbackType = 'none';
 			}, 1500);
 		}
-	}
-
-	function checkGameOver() {
-		if (progress.hearts === 0) {
-			alert('หัวใจหมดแล้ว! กลับไปพักผ่อนแล้วมาท้าทายใหม่นะ');
-			goto('/');
-			return true;
-		}
-		return false;
 	}
 
 	function nextFlashcard() {
@@ -526,10 +507,6 @@
 			</a>
 			<div class="h-4 flex-1 overflow-hidden rounded-full bg-muted">
 				<div class="h-full rounded-full bg-green-500 transition-all duration-500" style="width: {progressPercent}%"></div>
-			</div>
-			<div class="flex items-center gap-1.5 font-bold text-red-500">
-				<Heart class="size-6 fill-red-500" />
-				<span class="text-lg">{progress.hearts}</span>
 			</div>
 		</div>
 

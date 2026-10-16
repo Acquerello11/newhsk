@@ -23,7 +23,6 @@
 		Edit3,
 		Eye,
 		Activity,
-		Database,
 		Layers,
 		BrainCircuit,
 		Clock,
@@ -72,7 +71,7 @@
 
 	// Users State
 	let userSearchQuery = $state('');
-	let userFilterStatus = $state<'all' | 'active' | 'high_streak' | 'low_xp'>('all');
+	let userFilterStatus = $state<'all' | 'active' | 'high_streak' | 'low_xp' | 'at_risk'>('all');
 	let userRoleFilter = $state<'all' | 'learner' | 'admin'>('all');
 	let userSortBy = $state<'xp' | 'streak' | 'done' | 'joined'>('xp');
 	let userSortAsc = $state(false);
@@ -91,6 +90,7 @@
 	);
 	let selectedUserTab = $state<'dashboard' | 'progress' | 'mistakes' | 'evals' | 'events'>('dashboard');
 	let previewHskLevel = $state(1);
+	let practiceBreakdownHsk = $state(1);
 
 	// Stages Management State
 	let stageHskLevel = $state<number>(1);
@@ -109,7 +109,11 @@
 		((data as any).pitchSensitivity as any) || 'standard'
 	);
 	let funnelFilterHsk = $state<number | 'all'>('all');
+	let learningPracticeMode = $state<'stage' | 'word'>('stage');
 	let audioPlayingWord = $state<string | null>(null);
+	let activeLearningAnalytics = $derived(
+		data.learningAnalyticsByMode?.[learningPracticeMode] ?? data.advancedAnalytics
+	);
 
 	// Reset pagination to page 1 whenever search query, filters, or sorting change
 	$effect(() => {
@@ -119,28 +123,110 @@
 
 	// Derived dynamic tone accuracy for 4-tone distribution bar on dashboard
 	let tone1Accuracy = $derived(
-		(data.advancedAnalytics?.toneConfusionHeatmap?.matrix || []).find((m: any) => m.targetTone === 1)?.recognizedT1 ?? 89
+		(activeLearningAnalytics?.toneConfusionHeatmap?.matrix || []).find((m: any) => m.targetTone === 1)?.recognizedT1 ?? 0
 	);
 	let tone2Accuracy = $derived(
-		(data.advancedAnalytics?.toneConfusionHeatmap?.matrix || []).find((m: any) => m.targetTone === 2)?.recognizedT2 ?? 76
+		(activeLearningAnalytics?.toneConfusionHeatmap?.matrix || []).find((m: any) => m.targetTone === 2)?.recognizedT2 ?? 0
 	);
 	let tone3Accuracy = $derived(
-		(data.advancedAnalytics?.toneConfusionHeatmap?.matrix || []).find((m: any) => m.targetTone === 3)?.recognizedT3 ?? 68
+		(activeLearningAnalytics?.toneConfusionHeatmap?.matrix || []).find((m: any) => m.targetTone === 3)?.recognizedT3 ?? 0
 	);
 	let tone4Accuracy = $derived(
-		(data.advancedAnalytics?.toneConfusionHeatmap?.matrix || []).find((m: any) => m.targetTone === 4)?.recognizedT4 ?? 84
+		(activeLearningAnalytics?.toneConfusionHeatmap?.matrix || []).find((m: any) => m.targetTone === 4)?.recognizedT4 ?? 0
 	);
+	let toneSamples = $derived(
+		[1, 2, 3, 4].map((tone) => Number(
+			(activeLearningAnalytics?.toneConfusionHeatmap?.matrix || []).find((row: any) => row.targetTone === tone)?.sampleCount || 0
+		))
+	);
+	let tone34Stats = $derived.by(() => {
+		const rows = activeLearningAnalytics?.toneConfusionHeatmap?.matrix || [];
+		const tone3 = rows.find((row: any) => row.targetTone === 3);
+		const tone4 = rows.find((row: any) => row.targetTone === 4);
+		const samples3 = Number(tone3?.sampleCount || 0);
+		const samples4 = Number(tone4?.sampleCount || 0);
+		const samples = samples3 + samples4;
+		return {
+			samples,
+			confusionRate: samples > 0
+				? Math.round(((100 - Number(tone3?.recognizedT3 || 0)) * samples3 + (100 - Number(tone4?.recognizedT4 || 0)) * samples4) / samples)
+				: null
+		};
+	});
+	let atRiskUsers = $derived(
+		(data.users || [])
+			.filter((user: any) => !user.isAdmin && user.evaluationCount > 0 && user.avgGop !== null && user.avgGop < 70)
+			.sort((a: any, b: any) => a.avgGop - b.avgGop)
+	);
+	let weeklyPracticeMax = $derived(Math.max(
+		1,
+		...(data.participationTrend || []).flatMap((point: any) => [
+			point.stagePracticeCount,
+			point.wordPracticeCount,
+			point.unclassifiedCount
+		])
+	));
+	let weeklyStageGopPoints = $derived(
+		(data.participationTrend || [])
+			.map((point: any, index: number) => ({
+				...point,
+				x: 72 + index * 86,
+				y: point.stageAvgScore === null ? null : 190 - (point.stageAvgScore / 100) * 150
+			}))
+			.filter((point: any) => point.stageAvgScore !== null)
+	);
+	let weeklyWordGopPoints = $derived(
+		(data.participationTrend || [])
+			.map((point: any, index: number) => ({
+				...point,
+				x: 72 + index * 86,
+				y: point.wordAvgScore === null ? null : 190 - (point.wordAvgScore / 100) * 150
+			}))
+			.filter((point: any) => point.wordAvgScore !== null)
+	);
+	let weeklyStageGopPath = $derived(weeklyStageGopPoints.map((point: any) => `${point.x},${point.y}`).join(' '));
+	let weeklyWordGopPath = $derived(weeklyWordGopPoints.map((point: any) => `${point.x},${point.y}`).join(' '));
+	let stagePracticeBreakdown = $derived(
+		(data.practiceBreakdown?.stages || []).filter((item: any) => item.stageId.startsWith(`hsk${practiceBreakdownHsk}-`))
+	);
+	let stagePracticeBreakdownMax = $derived(Math.max(1, ...stagePracticeBreakdown.map((item: any) => item.count)));
+	let wordPracticeBreakdown = $derived(data.practiceBreakdown?.words || []);
+	let wordPracticeBreakdownMax = $derived(Math.max(1, ...wordPracticeBreakdown.map((item: any) => item.count)));
+	let practiceComparisonMax = $derived(Math.max(
+		1,
+		Number(data.practiceBreakdown?.summary?.stage?.attempts || 0),
+		Number(data.practiceBreakdown?.summary?.word?.attempts || 0)
+	));
 
 	// Derived statistics for Drop-off Funnel & Phoneme Matrix
-	let totalViews = $derived(data.advancedAnalytics?.dropOffFunnel?.totalViews ?? 0);
-	let totalAttempts = $derived(data.advancedAnalytics?.dropOffFunnel?.totalAttempts ?? 0);
-	let totalPassed = $derived(data.advancedAnalytics?.dropOffFunnel?.totalPassed ?? 0);
+	let totalViews = $derived(activeLearningAnalytics?.dropOffFunnel?.totalViews ?? 0);
+	let totalAttempts = $derived(activeLearningAnalytics?.dropOffFunnel?.totalAttempts ?? 0);
+	let totalPassed = $derived(activeLearningAnalytics?.dropOffFunnel?.totalPassed ?? 0);
 	let attemptRate = $derived(totalViews > 0 ? Math.round((totalAttempts / totalViews) * 100) : 0);
 	let passRate = $derived(totalViews > 0 ? Math.round((totalPassed / totalViews) * 100) : 0);
 	let quitRate = $derived(totalViews > 0 ? Math.round(((totalViews - totalPassed) / totalViews) * 100) : 0);
 
-	let phonemeTargets = $derived(data.advancedAnalytics?.phonemeSubstitutionMatrix?.targets || ['zh', 'ch', 'sh', 'z', 'c', 's', 'j', 'q', 'x']);
-	let phonemeMatrix = $derived(data.advancedAnalytics?.phonemeSubstitutionMatrix?.matrix || {});
+	let stageLevelStats = $derived([1, 2, 3].map((level) => {
+		const levelStages = (data.stages || []).filter((stage: any) => stage.hskLevel === level);
+		const attempts = levelStages.reduce((total: number, stage: any) => total + stage.stats.totalAttempts, 0);
+		const passed = levelStages.reduce((total: number, stage: any) => total + stage.stats.totalPassed, 0);
+		return {
+			level,
+			stageCount: levelStages.length,
+			attempts,
+			passed,
+			passRate: attempts > 0 ? Math.round((passed / attempts) * 100) : 0
+		};
+	}));
+	let popularStages = $derived(
+		[...(data.stages || [])]
+			.sort((a: any, b: any) => b.stats.totalViews - a.stats.totalViews)
+			.slice(0, 5)
+	);
+	let maxStageViews = $derived(Math.max(1, ...popularStages.map((stage: any) => stage.stats.totalViews)));
+
+	let phonemeTargets = $derived(activeLearningAnalytics?.phonemeSubstitutionMatrix?.targets || ['zh', 'ch', 'sh', 'z', 'c', 's', 'j', 'q', 'x']);
+	let phonemeMatrix = $derived(activeLearningAnalytics?.phonemeSubstitutionMatrix?.matrix || {});
 
 	function showAnalyticsToast(message: string, type: 'success' | 'info' = 'success') {
 		analyticsToast = { type, message };
@@ -308,6 +394,8 @@
 			list = list.filter((u) => u.streak >= 3);
 		} else if (userFilterStatus === 'low_xp') {
 			list = list.filter((u) => u.xp < 100);
+		} else if (userFilterStatus === 'at_risk') {
+			list = list.filter((u) => !u.isAdmin && u.evaluationCount > 0 && u.avgGop !== null && u.avgGop < 70);
 		}
 
 		if (userRoleFilter === 'learner') {
@@ -581,39 +669,6 @@
 			</div>
 		</div>
 
-		<!-- Sidebar Footer: Dual DB Live Status Card & Logout Button -->
-		<div class="p-4 border-t bg-muted/20 space-y-3">
-			<div class="rounded-2xl border bg-card p-3 shadow-xs space-y-2">
-				<div class="flex items-center justify-between">
-					<div class="flex items-center gap-1.5 font-bold text-[11px] text-foreground">
-						<Database class="size-3.5 text-primary" />
-						<span>Dual Cloud DB</span>
-					</div>
-					<span class="size-2 rounded-full bg-emerald-500 animate-pulse"></span>
-				</div>
-				<div class="text-[10px] space-y-1 text-muted-foreground">
-					<div class="flex items-center justify-between">
-						<span>Turso libSQL:</span>
-						<span class="font-mono text-emerald-600 font-bold">เชื่อมต่อแล้ว</span>
-					</div>
-					<div class="flex items-center justify-between">
-						<span>Neon PostgreSQL:</span>
-						<span class="font-mono text-blue-600 font-bold">เชื่อมต่อแล้ว</span>
-					</div>
-				</div>
-			</div>
-
-			<!-- Sidebar Full-Width Logout Button -->
-			<form method="POST" action="/logout?redirectTo=/admin">
-				<button
-					type="submit"
-					class="w-full flex items-center justify-center gap-2 rounded-xl border border-rose-200 dark:border-rose-900/50 bg-rose-50/50 dark:bg-rose-950/20 hover:bg-rose-100 dark:hover:bg-rose-900/40 text-rose-600 dark:text-rose-400 py-2 px-3 text-xs font-bold transition shadow-2xs cursor-pointer"
-				>
-					<LogOut class="size-3.5" />
-					<span>ออกจากระบบ (Logout)</span>
-				</button>
-			</form>
-		</div>
 	</aside>
 
 	<!-- Mobile Sidebar Overlay Backdrop -->
@@ -669,18 +724,8 @@
 				</div>
 			</div>
 
-			<!-- Right Status Badges & Admin Profile -->
+			<!-- Admin Profile -->
 			<div class="flex items-center gap-3">
-				<!-- Quick Database Badges -->
-				<div class="hidden sm:flex items-center gap-2 text-[11px] font-semibold">
-					<span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-emerald-600 border border-emerald-500/20">
-						<span class="size-1.5 rounded-full bg-emerald-500"></span> Turso Cloud
-					</span>
-					<span class="inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 px-2.5 py-1 text-blue-600 border border-blue-500/20">
-						<span class="size-1.5 rounded-full bg-blue-500"></span> Neon PostgreSQL
-					</span>
-				</div>
-
 				<a
 					href="/"
 					class="rounded-xl border bg-background hover:bg-muted px-3 py-1.5 text-xs font-bold transition flex items-center gap-1.5"
@@ -716,92 +761,283 @@
 		</header>
 
 		<!-- 3. PAGE CONTENT (Dasher Layout Canvas) -->
-		<div class="p-4 sm:p-8 space-y-6 max-w-7xl w-full mx-auto">
-			<!-- ROW 1: 4 DASHER HERO STAT CARDS (DashboardStats.tsx pattern) -->
-			<div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-				<!-- Card 1: Total Users -->
-				<div class="rounded-3xl border bg-card p-5 shadow-xs flex flex-col justify-between hover:shadow-md transition">
-					<div class="flex items-center justify-between">
-						<span class="text-xs font-bold uppercase tracking-wider text-muted-foreground">ผู้เรียน (Learners)</span>
-						<div class="flex size-10 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-600">
-							<Users class="size-5" />
-						</div>
-					</div>
-					<div class="mt-4">
-						<div class="text-3xl font-black text-foreground font-mono">{data.stats.totalLearners ?? data.stats.totalUsers}</div>
-						<div class="mt-1 flex items-center gap-1.5 text-xs">
-							<span class="font-bold text-emerald-600">+{data.stats.activeToday} คน active</span>
-							<span class="text-muted-foreground">• ผู้ดูแล (Admins): {data.stats.totalAdmins ?? 0}</span>
-						</div>
-					</div>
-				</div>
-
-				<!-- Card 2: Total XP -->
-				<div class="rounded-3xl border bg-card p-5 shadow-xs flex flex-col justify-between hover:shadow-md transition">
-					<div class="flex items-center justify-between">
-						<span class="text-xs font-bold uppercase tracking-wider text-muted-foreground">XP รวมของผู้เรียน</span>
-						<div class="flex size-10 items-center justify-center rounded-2xl bg-yellow-500/10 text-yellow-600">
-							<Zap class="size-5" />
-						</div>
-					</div>
-					<div class="mt-4">
-						<div class="text-3xl font-black text-foreground font-mono">{data.stats.totalXp.toLocaleString()}</div>
-						<div class="mt-1 flex items-center gap-1.5 text-xs">
-							<span class="font-bold text-yellow-600 font-mono">{Math.round(data.stats.totalXp / Math.max(1, data.stats.totalLearners ?? data.stats.totalUsers))} XP</span>
-							<span class="text-muted-foreground">เฉลี่ยต่อผู้เรียน (ไม่ปนแอดมิน)</span>
-						</div>
-					</div>
-				</div>
-
-				<!-- Card 3: Lessons Done -->
-				<div class="rounded-3xl border bg-card p-5 shadow-xs flex flex-col justify-between hover:shadow-md transition">
-					<div class="flex items-center justify-between">
-						<span class="text-xs font-bold uppercase tracking-wider text-muted-foreground">ด่านที่สำเร็จ</span>
-						<div class="flex size-10 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-600">
-							<Trophy class="size-5" />
-						</div>
-					</div>
-					<div class="mt-4">
-						<div class="text-3xl font-black text-foreground font-mono">{data.stats.totalCompletions}</div>
-						<div class="mt-1 flex items-center gap-1.5 text-xs">
-							<span class="font-bold text-orange-600 font-mono">Streak {data.stats.topStreak} วัน</span>
-							<span class="text-muted-foreground">สูงสุดในระบบ 🔥</span>
-						</div>
-					</div>
-				</div>
-
-				<!-- Card 4: Speech GOP Score -->
-				<div class="rounded-3xl border bg-card p-5 shadow-xs flex flex-col justify-between hover:shadow-md transition">
-					<div class="flex items-center justify-between">
-						<span class="text-xs font-bold uppercase tracking-wider text-muted-foreground">ความแม่นยำ GOP</span>
-						<div class="flex size-10 items-center justify-center rounded-2xl bg-purple-500/10 text-purple-600">
-							<Sparkles class="size-5" />
-						</div>
-					</div>
-					<div class="mt-4">
-						<div class="text-3xl font-black text-purple-600 font-mono">{data.stats.avgGopScore}%</div>
-						<div class="mt-1 flex items-center gap-1.5 text-xs">
-							<span class="font-bold text-muted-foreground font-mono">PER {data.stats.avgPerRate}%</span>
-							<span class="text-muted-foreground">อัตราสับสนหน่วยเสียง</span>
-						</div>
-					</div>
-				</div>
-			</div>
-
-			<!-- ROW 2: DASHER 2-COLUMN SPLIT (Col-8 Left & Col-4 Right) -->
+		<div class="p-4 sm:p-6 space-y-4 max-w-7xl w-full mx-auto">
 			{#if activeTab === 'dashboard'}
-				<div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-					<!-- LEFT COLUMN: COL-8 (Active Stages + Learners Table + Activity Log) -->
-					<div class="lg:col-span-8 space-y-6">
-						<!-- 1. Active Stages Table (Dasher ActiveProject.tsx pattern) -->
-						<div class="rounded-3xl border bg-card p-6 shadow-xs">
-							<div class="flex items-center justify-between mb-4">
+				<div class="grid grid-cols-2 xl:grid-cols-4 gap-3">
+					<div class="min-h-24 rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-card px-4 py-3 shadow-xs">
+						<div class="flex items-center justify-between gap-2 text-xs font-semibold text-muted-foreground">
+							<span>เข้าเรียนวันนี้</span><Users class="size-4 text-emerald-600" />
+						</div>
+						<div class="mt-2 flex items-baseline gap-2">
+							<span class="font-mono tabular-nums text-2xl font-bold text-foreground">{data.stats.activeToday}</span>
+							<span class="text-[11px] text-muted-foreground">/ {data.stats.totalLearners} ผู้เรียน</span>
+						</div>
+					</div>
+
+					<button
+						type="button"
+						onclick={() => { activeTab = 'users'; userFilterStatus = 'at_risk'; userRoleFilter = 'learner'; }}
+						class="min-h-24 rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-card px-4 py-3 text-left shadow-xs transition hover:border-amber-400/60 hover:bg-amber-500/[0.03]"
+					>
+						<div class="flex items-center justify-between gap-2 text-xs font-semibold text-muted-foreground">
+							<span>ต้องดูแล (GOP &lt; 70)</span><AlertTriangle class="size-4 text-amber-600" />
+						</div>
+						<div class="mt-2 flex items-baseline gap-2">
+							<span class="font-mono tabular-nums text-2xl font-bold text-amber-700 dark:text-amber-400">{atRiskUsers.length}</span>
+							<span class="text-[11px] text-muted-foreground">ผู้เรียนที่มีผลประเมิน</span>
+						</div>
+					</button>
+
+					<div class="min-h-24 rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-card px-4 py-3 shadow-xs">
+						<div class="flex items-center justify-between gap-2 text-xs font-semibold text-muted-foreground">
+							<span>คะแนนออกเสียงเฉลี่ย · รวมทุกโหมด</span><Sparkles class="size-4 text-violet-600" />
+						</div>
+						<div class="mt-2 flex items-baseline gap-3">
+							<div><span class="font-mono tabular-nums text-2xl font-bold text-violet-700 dark:text-violet-400">{data.classPhonemeStats.totalAttempts ? `${data.classPhonemeStats.avgGop}%` : '—'}</span><span class="ml-1 text-[10px] text-muted-foreground">GOP</span></div>
+							<div><span class="font-mono tabular-nums text-base font-semibold text-foreground">{data.classPhonemeStats.totalAttempts ? `${data.classPhonemeStats.avgPer}%` : '—'}</span><span class="ml-1 text-[10px] text-muted-foreground">PER</span></div>
+						</div>
+					</div>
+
+					<div class="min-h-24 rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-card px-4 py-3 shadow-xs">
+						<div class="flex items-center justify-between gap-2 text-xs font-semibold text-muted-foreground">
+							<span>สับสนวรรณยุกต์ 3 / 4 · {learningPracticeMode === 'stage' ? 'Quest' : 'Pitch'}</span><Activity class="size-4 text-rose-600" />
+						</div>
+						<div class="mt-2 flex items-baseline gap-2">
+							<span class="font-mono tabular-nums text-2xl font-bold text-rose-700 dark:text-rose-400">{tone34Stats.confusionRate === null ? '—' : `${tone34Stats.confusionRate}%`}</span>
+							<span class="text-[11px] text-muted-foreground">{tone34Stats.samples} ตัวอย่าง</span>
+						</div>
+					</div>
+				</div>
+
+				<section class="grid grid-cols-1 gap-3 sm:grid-cols-3" aria-label="สถิติการเรียนรู้แยกตามประเภทการฝึก">
+					<div class="rounded-xl border border-blue-200/80 bg-blue-50/60 px-4 py-3 dark:border-blue-900/80 dark:bg-blue-950/20">
+						<div class="flex items-center justify-between gap-2 text-xs font-bold text-blue-700 dark:text-blue-400">
+							<span>Quest · ฝึกในด่าน</span><span>30 วัน</span>
+						</div>
+						<div class="mt-2 flex items-baseline gap-3">
+							<strong class="font-mono tabular-nums text-2xl text-foreground">{data.practiceBreakdown.summary.stage.attempts}</strong>
+							<span class="text-[11px] text-muted-foreground">ครั้ง · {data.practiceBreakdown.summary.stage.learners} ผู้เรียน · {data.practiceBreakdown.summary.stage.stages} ด่าน</span>
+						</div>
+						<p class="mt-1 text-[11px] text-muted-foreground">GOP เฉลี่ย <strong class="font-mono tabular-nums text-blue-700 dark:text-blue-400">{data.practiceBreakdown.summary.stage.avgScore === null ? '—' : `${data.practiceBreakdown.summary.stage.avgScore}%`}</strong></p>
+					</div>
+					<div class="rounded-xl border border-violet-200/80 bg-violet-50/60 px-4 py-3 dark:border-violet-900/80 dark:bg-violet-950/20">
+						<div class="flex items-center justify-between gap-2 text-xs font-bold text-violet-700 dark:text-violet-400">
+							<span>Pitch · ฝึกคำเดี่ยว</span><span>30 วัน</span>
+						</div>
+						<div class="mt-2 flex items-baseline gap-3">
+							<strong class="font-mono tabular-nums text-2xl text-foreground">{data.practiceBreakdown.summary.word.attempts}</strong>
+							<span class="text-[11px] text-muted-foreground">ครั้ง · {data.practiceBreakdown.summary.word.learners} ผู้เรียน · {data.practiceBreakdown.summary.word.words} คำ</span>
+						</div>
+						<p class="mt-1 text-[11px] text-muted-foreground">GOP เฉลี่ย <strong class="font-mono tabular-nums text-violet-700 dark:text-violet-400">{data.practiceBreakdown.summary.word.avgScore === null ? '—' : `${data.practiceBreakdown.summary.word.avgScore}%`}</strong></p>
+					</div>
+					<div class="rounded-xl border border-slate-200/80 bg-slate-50/70 px-4 py-3 dark:border-slate-800/80 dark:bg-slate-900/30">
+						<div class="flex items-center justify-between gap-2 text-xs font-bold text-muted-foreground">
+							<span>ยังระบุประเภทไม่ได้</span><span>30 วัน</span>
+						</div>
+						<div class="mt-2 flex items-baseline gap-3">
+							<strong class="font-mono tabular-nums text-2xl text-foreground">{data.practiceBreakdown.summary.unclassified.attempts}</strong>
+							<span class="text-[11px] text-muted-foreground">ครั้ง</span>
+						</div>
+						<p class="mt-1 text-[11px] text-muted-foreground">ไม่รวมในสถิติ Pitch หรือ Quest</p>
+					</div>
+				</section>
+
+				<section class="rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-card p-4 shadow-xs">
+					<div class="mb-2 flex flex-wrap items-start justify-between gap-3">
+						<div>
+							<h2 class="text-sm font-extrabold text-foreground">แนวโน้มการฝึก 7 วันล่าสุด</h2>
+							<p class="mt-1 text-[11px] text-muted-foreground">แยกฝึกในด่านกับฝึกคำเดี่ยว พร้อมคะแนน GOP เฉลี่ยรายวัน</p>
+						</div>
+						<div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+							<span class="inline-flex items-center gap-1.5 text-blue-700 dark:text-blue-400"><span class="size-2.5 rounded-sm bg-blue-500"></span>ฝึกแบบด่าน · ครั้ง</span>
+							<span class="inline-flex items-center gap-1.5 text-violet-700 dark:text-violet-400"><span class="size-2.5 rounded-sm bg-violet-500"></span>ฝึกคำเดี่ยว · ครั้ง</span>
+							<span class="inline-flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400"><span class="size-2 rounded-full bg-emerald-500"></span>GOP เฉลี่ย · ด่าน</span>
+							<span class="inline-flex items-center gap-1.5 text-amber-700 dark:text-amber-400"><span class="size-2 rounded-full bg-amber-500"></span>GOP เฉลี่ย · คำเดี่ยว</span>
+						</div>
+					</div>
+					{#if (data.participationTrend || []).some((point: any) => point.stagePracticeCount + point.wordPracticeCount + point.unclassifiedCount > 0)}
+						<svg viewBox="0 0 660 250" role="img" aria-label="กราฟแนวโน้มจำนวนครั้งฝึกและคะแนน GOP เฉลี่ย 7 วันล่าสุด" class="h-56 w-full overflow-visible">
+							{#each [0, 25, 50, 75, 100] as tick (tick)}
+								{@const y = 190 - (tick / 100) * 150}
+								<line x1="52" x2="620" y1={y} y2={y} stroke="currentColor" class="text-border" stroke-dasharray={tick === 0 ? '0' : '3 5'} />
+								<text x="44" y={y + 4} text-anchor="end" class="fill-muted-foreground" font-size="10">{Math.round((weeklyPracticeMax * tick) / 100)}</text>
+								<text x="628" y={y + 4} text-anchor="start" class="fill-muted-foreground" font-size="10">{tick}%</text>
+							{/each}
+							{#each data.participationTrend || [] as point, index (point.day)}
+								{@const x = 72 + index * 86}
+								{@const stageBarHeight = (point.stagePracticeCount / weeklyPracticeMax) * 150}
+								{@const wordBarHeight = (point.wordPracticeCount / weeklyPracticeMax) * 150}
+								{@const unclassifiedBarHeight = (point.unclassifiedCount / weeklyPracticeMax) * 150}
+								<g>
+									<title>{point.formattedDate}: ฝึกด่าน {point.stagePracticeCount} ครั้ง, ฝึกคำเดี่ยว {point.wordPracticeCount} ครั้ง, ยังไม่แยกประเภท {point.unclassifiedCount} ครั้ง</title>
+									<rect x={x - 25} y={190 - stageBarHeight} width="15" height={stageBarHeight} rx="3" class="fill-blue-500/80" />
+									<rect x={x - 7} y={190 - wordBarHeight} width="15" height={wordBarHeight} rx="3" class="fill-violet-500/80" />
+									<rect x={x + 11} y={190 - unclassifiedBarHeight} width="15" height={unclassifiedBarHeight} rx="3" class="fill-slate-400/70" />
+									<text x={x} y="216" text-anchor="middle" class="fill-muted-foreground" font-size="10">{point.formattedDate}</text>
+								</g>
+							{/each}
+							{#if weeklyStageGopPoints.length > 1}
+								<polyline points={weeklyStageGopPath} fill="none" stroke="#10b981" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+							{/if}
+							{#if weeklyWordGopPoints.length > 1}
+								<polyline points={weeklyWordGopPath} fill="none" stroke="#f59e0b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+							{/if}
+							{#each weeklyStageGopPoints as point (point.day)}
+								<g>
+									<title>{point.formattedDate}: GOP ฝึกแบบด่าน {point.stageAvgScore}%</title>
+									<circle cx={point.x} cy={point.y} r="4.5" fill="#10b981" stroke="var(--card)" stroke-width="2" />
+								</g>
+							{/each}
+							{#each weeklyWordGopPoints as point (point.day)}
+								<g>
+									<title>{point.formattedDate}: GOP ฝึกคำเดี่ยว {point.wordAvgScore}%</title>
+									<circle cx={point.x} cy={point.y} r="4.5" fill="#f59e0b" stroke="var(--card)" stroke-width="2" />
+								</g>
+							{/each}
+						</svg>
+						{#if (data.participationTrend || []).some((point: any) => point.unclassifiedCount > 0)}
+							<p class="mt-1 text-[10px] text-muted-foreground">แท่งสีเทาคือข้อมูลเก่าที่ยังไม่มีประเภทฝึก จึงแยกเป็นฝึกด่านหรือคำเดี่ยวไม่ได้</p>
+						{/if}
+					{:else}
+						<div class="flex h-44 items-center justify-center rounded-lg border border-dashed text-xs text-muted-foreground">
+							ยังไม่มีข้อมูลการฝึกในช่วง 7 วันที่ผ่านมา
+						</div>
+					{/if}
+				</section>
+
+				<div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
+					<section class="rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-card p-4 shadow-xs">
+						<div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+							<div>
+								<h2 class="text-sm font-extrabold text-foreground">ผลฝึกแยกรายด่าน</h2>
+								<p class="mt-1 text-[11px] text-muted-foreground">จำนวนการประเมินและ GOP เฉลี่ยใน 30 วันล่าสุด</p>
+							</div>
+							<div class="flex items-center gap-1" aria-label="เลือกระดับ HSK">
+								{#each [1, 2, 3] as level (level)}
+									<button
+										type="button"
+										onclick={() => (practiceBreakdownHsk = level)}
+										class="rounded-md px-2.5 py-1 text-[11px] font-bold transition {practiceBreakdownHsk === level ? 'bg-primary text-white' : 'text-muted-foreground hover:bg-muted'}"
+									>HSK {level}</button>
+								{/each}
+							</div>
+						</div>
+						{#if stagePracticeBreakdown.length}
+							<div class="space-y-2">
+								{#each stagePracticeBreakdown as item (item.stageId)}
+									<div class="grid grid-cols-[4.5rem_minmax(0,1fr)_3rem_3.5rem] items-center gap-2 text-[11px]">
+										<span class="truncate font-semibold text-foreground">ด่าน {item.stageId.split('-stage-')[1] || item.stageId}</span>
+										<div class="h-2 overflow-hidden rounded-sm bg-muted" role="img" aria-label="ฝึก {item.count} ครั้ง">
+											<div class="h-full rounded-sm bg-blue-500" style="width: {Math.max(3, (item.count / stagePracticeBreakdownMax) * 100)}%"></div>
+										</div>
+										<span class="text-right font-mono tabular-nums text-muted-foreground">{item.count}</span>
+										<span class="text-right font-mono tabular-nums font-semibold text-emerald-700 dark:text-emerald-400">{item.avgScore}%</span>
+									</div>
+								{/each}
+							</div>
+						{:else}
+							<div class="flex h-28 items-center justify-center rounded-lg border border-dashed text-xs text-muted-foreground">
+								ยังไม่มีผลฝึกด่านใน HSK {practiceBreakdownHsk} ช่วง 30 วันที่ผ่านมา
+							</div>
+						{/if}
+					</section>
+
+					<section class="rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-card p-4 shadow-xs">
+						<div class="mb-3">
+							<h2 class="text-sm font-extrabold text-foreground">ผลฝึกแยกรายคำ</h2>
+							<p class="mt-1 text-[11px] text-muted-foreground">8 คำที่มีการฝึกเดี่ยวมากที่สุดใน 30 วันล่าสุด</p>
+						</div>
+						{#if wordPracticeBreakdown.length}
+							<div class="space-y-2">
+								{#each wordPracticeBreakdown as item (item.word)}
+									<div class="grid grid-cols-[3rem_minmax(0,1fr)_3rem_3.5rem] items-center gap-2 text-[11px]">
+										<span class="text-base font-semibold text-foreground">{item.word}</span>
+										<div class="h-2 overflow-hidden rounded-sm bg-muted" role="img" aria-label="ฝึก {item.count} ครั้ง">
+											<div class="h-full rounded-sm bg-violet-500" style="width: {Math.max(3, (item.count / wordPracticeBreakdownMax) * 100)}%"></div>
+										</div>
+										<span class="text-right font-mono tabular-nums text-muted-foreground">{item.count}</span>
+										<span class="text-right font-mono tabular-nums font-semibold text-emerald-700 dark:text-emerald-400">{item.avgScore}%</span>
+									</div>
+								{/each}
+							</div>
+						{:else}
+							<div class="flex h-28 items-center justify-center rounded-lg border border-dashed text-xs text-muted-foreground">
+								ยังไม่มีผลฝึกคำเดี่ยวในช่วง 30 วันที่ผ่านมา
+							</div>
+						{/if}
+					</section>
+				</div>
+
+				<div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+					<section class="rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-card p-4 shadow-xs">
+						<div class="mb-5 flex items-start justify-between gap-3">
+							<div>
+								<h2 class="text-base font-extrabold text-foreground">ภาพรวมผลการเรียนตามระดับ HSK</h2>
+								<p class="mt-1 text-xs text-muted-foreground">อัตราผ่านจากจำนวนครั้งที่เริ่มทำแบบฝึกหัด</p>
+							</div>
+							<BarChart3 class="size-5 shrink-0 text-emerald-600" />
+						</div>
+						<div class="space-y-5">
+							{#each stageLevelStats as level (level.level)}
 								<div>
-									<h2 class="text-base font-extrabold text-foreground flex items-center gap-2">
+									<div class="mb-1.5 flex items-center justify-between text-xs">
+										<span class="font-bold text-foreground">HSK {level.level} <span class="font-normal text-muted-foreground">· {level.stageCount} ด่าน</span></span>
+										<span class="font-mono font-bold text-emerald-700 dark:text-emerald-400">{level.passRate}% <span class="font-normal text-muted-foreground">({level.passed}/{level.attempts})</span></span>
+									</div>
+									<div
+										class="h-3 overflow-hidden rounded-full bg-muted"
+										role="img"
+										aria-label="HSK {level.level}: ผ่าน {level.passRate}%"
+									>
+										<div class="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all" style="width: {level.passRate}%"></div>
+									</div>
+								</div>
+							{/each}
+						</div>
+					</section>
+
+					<section class="rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-card p-4 shadow-xs">
+						<div class="mb-5 flex items-start justify-between gap-3">
+							<div>
+								<h2 class="text-base font-extrabold text-foreground">ด่านที่มีผู้เข้าชมมากที่สุด</h2>
+								<p class="mt-1 text-xs text-muted-foreground">จำนวนการเปิดดูด่านจากข้อมูล telemetry</p>
+							</div>
+							<TrendingUp class="size-5 shrink-0 text-blue-600" />
+						</div>
+						{#if popularStages.some((stage: any) => stage.stats.totalViews > 0)}
+							<div class="space-y-4">
+								{#each popularStages as stage (stage.id)}
+									<div>
+										<div class="mb-1.5 flex items-center justify-between gap-3 text-xs">
+											<span class="min-w-0 truncate font-bold text-foreground">{stage.title} <span class="font-normal text-muted-foreground">· HSK {stage.hskLevel}</span></span>
+											<span class="shrink-0 font-mono font-bold text-blue-700 dark:text-blue-400">{stage.stats.totalViews}</span>
+										</div>
+										<div class="h-2.5 overflow-hidden rounded-full bg-muted" role="img" aria-label="{stage.title}: {stage.stats.totalViews} ครั้ง">
+											<div class="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-400" style="width: {Math.max(3, (stage.stats.totalViews / maxStageViews) * 100)}%"></div>
+										</div>
+									</div>
+								{/each}
+							</div>
+						{:else}
+							<div class="flex min-h-32 items-center justify-center rounded-2xl border border-dashed text-center text-xs text-muted-foreground">
+								ยังไม่มีข้อมูลการเข้าชมด่าน
+							</div>
+						{/if}
+					</section>
+				</div>
+
+				<div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+					<!-- LEFT COLUMN: COL-8 (Active Stages + Learners Table + Activity Log) -->
+					<div class="lg:col-span-8 space-y-4">
+						<!-- 1. Active Stages Table (Dasher ActiveProject.tsx pattern) -->
+						<div class="rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-card p-4 shadow-xs">
+							<div class="flex items-center justify-between mb-3">
+								<div>
+									<h2 class="text-sm font-extrabold text-foreground flex items-center gap-2">
 										<Layers class="size-4 text-purple-500" />
 										<span>ด่านแบบฝึกหัดที่เปิดใช้งาน (Active Quest Stages)</span>
 									</h2>
-									<p class="text-xs text-muted-foreground">สรุปจำนวนคนเข้าดู, คนผ่าน, คนไม่ผ่าน และอัตราความสำเร็จ</p>
+									<p class="text-[11px] text-muted-foreground">เข้าดู · ผ่าน · หลุด · จำนวนคำ · ปรับเนื้อหาได้จากปุ่มแก้ไข</p>
 								</div>
 								<button
 									onclick={() => (activeTab = 'stages')}
@@ -816,38 +1052,38 @@
 									<thead class="border-b bg-muted/30 font-bold uppercase tracking-wider text-muted-foreground">
 										<tr>
 											<th class="py-2.5 px-3">ด่าน (Stage)</th>
-											<th class="py-2.5 px-3 text-center">เข้าดู (Views)</th>
-											<th class="py-2.5 px-3 text-center">ผ่าน (Passed)</th>
-											<th class="py-2.5 px-3 text-center">ไม่ผ่าน (Failed)</th>
-											<th class="py-2.5 px-3 text-center">อัตราผ่าน (Pass %)</th>
-											<th class="py-2.5 px-3 text-center">การจัดการ</th>
-										</tr>
-									</thead>
-									<tbody class="divide-y">
-										{#each data.stages.slice(0, 5) as st (st.id)}
-											<tr class="hover:bg-muted/10 transition">
-												<td class="py-3 px-3">
-													<div class="font-extrabold text-foreground">{st.title}</div>
-													<div class="text-[10px] text-muted-foreground">HSK {st.hskLevel} • {st.id}</div>
+										<th class="py-2 px-3 text-right">คำ</th>
+										<th class="py-2 px-3 text-right">เข้าดู</th>
+										<th class="py-2 px-3 text-right">ผ่าน</th>
+										<th class="py-2 px-3 text-right">Drop</th>
+										<th class="py-2 px-3 text-right">ผ่าน %</th>
+										<th class="py-2 px-3 text-right">จัดการ</th>
+									</tr>
+								</thead>
+								<tbody class="divide-y">
+									{#each data.stages.slice(0, 5) as st (st.id)}
+										<tr class="h-10 hover:bg-muted/10 transition">
+											<td class="py-1.5 px-3">
+												<div class="font-extrabold text-foreground">{st.title}</div>
+												<div class="text-[10px] text-muted-foreground">HSK {st.hskLevel} · {st.id}</div>
+											</td>
+											<td class="py-1.5 px-3 text-right font-mono tabular-nums">{st.wordsCount}</td>
+											<td class="py-1.5 px-3 text-right font-mono tabular-nums text-blue-600">
+												{st.stats.totalViews}
+											</td>
+											<td class="py-1.5 px-3 text-right font-mono tabular-nums text-emerald-600">
+												{st.stats.totalPassed}
+											</td>
+											<td class="py-1.5 px-3 text-right font-mono tabular-nums text-rose-600">
+												{st.stats.dropRate}%
+											</td>
+											<td class="py-1.5 px-3 text-right font-mono tabular-nums font-bold text-emerald-700 dark:text-emerald-400">
+												{st.stats.passRate}%
 												</td>
-												<td class="py-3 px-3 text-center font-mono font-bold text-blue-600">
-													{st.stats.totalViews}
-												</td>
-												<td class="py-3 px-3 text-center font-mono font-bold text-emerald-600">
-													{st.stats.totalPassed}
-												</td>
-												<td class="py-3 px-3 text-center font-mono font-bold text-rose-600">
-													{st.stats.totalFailed}
-												</td>
-												<td class="py-3 px-3 text-center">
-													<span class="rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 font-mono font-bold px-2 py-0.5">
-														{st.stats.passRate}%
-													</span>
-												</td>
-												<td class="py-3 px-3 text-center">
+											<td class="py-1.5 px-3 text-right">
 													<button
 														onclick={() => (editingStage = { ...st })}
-														class="rounded-lg bg-primary/10 hover:bg-primary/20 text-primary px-2.5 py-1 text-xs font-bold transition"
+													class="font-bold text-primary hover:underline"
 													>
 														แก้ไข
 													</button>
@@ -859,56 +1095,54 @@
 							</div>
 						</div>
 
-						<!-- 2. Learners Table (Dasher TeamsTable.tsx pattern) -->
-						<div class="rounded-3xl border bg-card p-6 shadow-xs">
-							<div class="flex items-center justify-between mb-4">
+						<!-- 2. Students needing remedial attention -->
+						<div class="rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-card p-4 shadow-xs">
+							<div class="flex items-center justify-between mb-3">
 								<div>
-									<h2 class="text-base font-extrabold text-foreground flex items-center gap-2">
-										<Users class="size-4 text-blue-500" />
-										<span>รายชื่อผู้เรียนล่าสุด (Learner Directory)</span>
+									<h2 class="text-sm font-extrabold text-foreground flex items-center gap-2">
+										<AlertTriangle class="size-4 text-amber-600" />
+										<span>นักเรียนที่ควรได้รับการดูแล</span>
 									</h2>
-									<p class="text-xs text-muted-foreground">คลิกเพื่อดูข้อมูลเจาะลึก หรือสวมบทบาทดูหน้า Dashboard ของผู้เรียน</p>
+									<p class="text-[11px] text-muted-foreground">เรียงตาม GOP เฉลี่ยต่ำสุด · เกณฑ์ GOP &lt; 70 · คลิกดูข้อมูลและชุดซ่อมเสริม</p>
 								</div>
 								<button
-									onclick={() => (activeTab = 'users')}
+									onclick={() => { activeTab = 'users'; userFilterStatus = 'at_risk'; userRoleFilter = 'learner'; }}
 									class="text-xs font-bold text-primary hover:underline"
 								>
-									ดูทั้งหมด {data.users.length} คน →
+									ดูรายชื่อทั้งหมด →
 								</button>
 							</div>
 
-							<div class="divide-y text-xs">
-								{#each data.users.slice(0, 5) as u (u.id)}
-									<div class="py-3 flex items-center justify-between">
-										<div class="flex items-center gap-3">
-											<div class="flex size-9 items-center justify-center rounded-2xl bg-primary/10 font-black text-primary uppercase">
-												{u.username.charAt(0)}
-											</div>
-											<div>
-												<button
-													onclick={() => openUserDrilldown(u)}
-													class="font-extrabold text-foreground hover:underline text-left"
-												>
-													{u.username}
-												</button>
-												<div class="text-[10px] text-muted-foreground">
-													#{u.id} • สมัคร {timeAgo(u.createdAt)}
-												</div>
-											</div>
-										</div>
-
-										<div class="flex items-center gap-3">
-											<span class="font-mono font-bold text-yellow-600">{u.xp} XP</span>
-											<span class="font-mono font-bold text-emerald-600">{u.totalCompleted} ด่าน</span>
-											<button
-												onclick={() => openUserDrilldown(u)}
-												class="rounded-xl bg-primary/10 hover:bg-primary/20 text-primary px-2.5 py-1 font-bold transition"
-											>
-												ดูรายละเอียด
-											</button>
-										</div>
-									</div>
-								{/each}
+							<div class="overflow-x-auto rounded-lg border">
+								<table class="w-full text-xs">
+									<thead class="border-b bg-muted/30 text-muted-foreground">
+										<tr>
+											<th class="h-9 px-3 text-left font-semibold">ผู้เรียน</th>
+											<th class="h-9 px-3 text-right font-semibold">GOP</th>
+											<th class="h-9 px-3 text-right font-semibold">PER</th>
+											<th class="h-9 px-3 text-right font-semibold">ครั้ง</th>
+											<th class="h-9 px-3 text-right font-semibold">ซ่อมเสริม</th>
+										</tr>
+									</thead>
+									<tbody class="divide-y">
+										{#each atRiskUsers.slice(0, 5) as u (u.id)}
+											<tr class="h-10 hover:bg-amber-500/[0.04]">
+												<td class="px-3 text-left">
+													<button onclick={() => openUserDrilldown(u)} class="font-semibold text-foreground hover:text-primary hover:underline">{u.username}</button>
+													<span class="ml-1.5 text-[10px] text-muted-foreground">#{u.id}</span>
+												</td>
+												<td class="px-3 text-right font-mono tabular-nums font-bold text-rose-600">{u.avgGop?.toFixed(1)}%</td>
+												<td class="px-3 text-right font-mono tabular-nums">{u.avgPer?.toFixed(1) ?? '—'}%</td>
+												<td class="px-3 text-right font-mono tabular-nums">{u.evaluationCount}</td>
+												<td class="px-3 text-right">
+													<button onclick={() => openUserDrilldown(u)} class="font-semibold text-primary hover:underline">ดูชุดฝึก</button>
+												</td>
+											</tr>
+										{:else}
+											<tr><td colspan="5" class="h-16 px-3 text-center text-muted-foreground">ยังไม่มีผู้เรียนที่มีผล GOP ต่ำกว่า 70%</td></tr>
+										{/each}
+									</tbody>
+								</table>
 							</div>
 						</div>
 
@@ -975,7 +1209,7 @@
 						</div>
 
 						<!-- 2. Phoneme & Tone Progress Breakdown (Dasher TaskProgress.tsx pattern) -->
-						<div class="rounded-3xl border bg-card p-6 shadow-xs space-y-4">
+						<div class="rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-card p-4 shadow-xs space-y-3">
 							<div class="flex items-center justify-between">
 								<h3 class="font-extrabold text-sm text-foreground">ความแม่นยำวรรณยุกต์ (Tone Accuracy)</h3>
 								<span class="text-xs font-mono font-bold text-primary">4 เสียงหลัก</span>
@@ -986,40 +1220,40 @@
 								<div>
 									<div class="flex justify-between mb-1">
 										<span class="font-bold">เสียงที่ 1 (阴平 - เสียงสูงราบ 55)</span>
-										<span class="font-mono font-bold text-emerald-600">{tone1Accuracy}%</span>
+										<span class="font-mono font-bold text-emerald-600">{toneSamples[0] ? `${tone1Accuracy}%` : '—'}</span>
 									</div>
 									<div class="h-2 rounded-full bg-muted overflow-hidden">
-										<div class="h-full bg-emerald-500 rounded-full transition-all duration-500" style="width: {tone1Accuracy}%;"></div>
+										<div class="h-full bg-emerald-500 rounded-full transition-all duration-500" style="width: {toneSamples[0] ? tone1Accuracy : 0}%;"></div>
 									</div>
 								</div>
 
 								<div>
 									<div class="flex justify-between mb-1">
 										<span class="font-bold">เสียงที่ 2 (阳平 - เสียงขึ้น 35)</span>
-										<span class="font-mono font-bold text-blue-600">{tone2Accuracy}%</span>
+										<span class="font-mono font-bold text-blue-600">{toneSamples[1] ? `${tone2Accuracy}%` : '—'}</span>
 									</div>
 									<div class="h-2 rounded-full bg-muted overflow-hidden">
-										<div class="h-full bg-blue-500 rounded-full transition-all duration-500" style="width: {tone2Accuracy}%;"></div>
+										<div class="h-full bg-blue-500 rounded-full transition-all duration-500" style="width: {toneSamples[1] ? tone2Accuracy : 0}%;"></div>
 									</div>
 								</div>
 
 								<div>
 									<div class="flex justify-between mb-1">
 										<span class="font-bold">เสียงที่ 3 (上声 - เสียงลงแล้วขึ้น 214)</span>
-										<span class="font-mono font-bold text-amber-600">{tone3Accuracy}%</span>
+										<span class="font-mono font-bold text-amber-600">{toneSamples[2] ? `${tone3Accuracy}%` : '—'}</span>
 									</div>
 									<div class="h-2 rounded-full bg-muted overflow-hidden">
-										<div class="h-full bg-amber-500 rounded-full transition-all duration-500" style="width: {tone3Accuracy}%;"></div>
+										<div class="h-full bg-amber-500 rounded-full transition-all duration-500" style="width: {toneSamples[2] ? tone3Accuracy : 0}%;"></div>
 									</div>
 								</div>
 
 								<div>
 									<div class="flex justify-between mb-1">
 										<span class="font-bold">เสียงที่ 4 (去声 - เสียงลงฮวบ 51)</span>
-										<span class="font-mono font-bold text-purple-600">{tone4Accuracy}%</span>
+										<span class="font-mono font-bold text-purple-600">{toneSamples[3] ? `${tone4Accuracy}%` : '—'}</span>
 									</div>
 									<div class="h-2 rounded-full bg-muted overflow-hidden">
-										<div class="h-full bg-purple-500 rounded-full transition-all duration-500" style="width: {tone4Accuracy}%;"></div>
+										<div class="h-full bg-purple-500 rounded-full transition-all duration-500" style="width: {toneSamples[3] ? tone4Accuracy : 0}%;"></div>
 									</div>
 								</div>
 							</div>
@@ -1094,69 +1328,67 @@
 							>
 								⚡ Active วันนี้
 							</button>
+							<button
+								onclick={() => (userFilterStatus = userFilterStatus === 'at_risk' ? 'all' : 'at_risk')}
+								class="rounded-xl px-3 py-1.5 text-xs font-bold transition {userFilterStatus === 'at_risk' ? 'bg-rose-600 text-white' : 'border text-muted-foreground hover:bg-muted'}"
+							>
+								ต้องดูแล ({atRiskUsers.length})
+							</button>
 						</div>
 					</div>
 
-					<div class="overflow-x-auto rounded-2xl border">
+					<div class="overflow-x-auto rounded-lg border">
 						<table class="w-full text-left text-xs">
 							<thead class="border-b bg-muted/30 font-bold uppercase tracking-wider text-muted-foreground">
 								<tr>
-									<th class="py-3 px-4">#</th>
-									<th class="py-3 px-4">ชื่อผู้ใช้ & สิทธิ์ (Role)</th>
-									<th class="py-3 px-4 text-right">XP</th>
-									<th class="py-3 px-4 text-right">Streak</th>
-									<th class="py-3 px-4 text-right">ผ่านแล้ว</th>
-									<th class="py-3 px-4 text-right">ฝึกฝนล่าสุด</th>
-									<th class="py-3 px-4 text-center">การจัดการ</th>
+									<th class="h-9 px-3">#</th>
+									<th class="h-9 px-3">ผู้เรียน</th>
+									<th class="h-9 px-3 text-right">GOP</th>
+									<th class="h-9 px-3 text-right">PER</th>
+									<th class="h-9 px-3 text-right">Streak</th>
+									<th class="h-9 px-3 text-right">ผ่านแล้ว</th>
+									<th class="h-9 px-3 text-right">ฝึกล่าสุด</th>
+									<th class="h-9 px-3 text-right">การจัดการ</th>
 								</tr>
 							</thead>
 							<tbody class="divide-y">
 								{#each paginatedUsers as u, idx (u.id)}
-									<tr class="hover:bg-muted/10 transition">
-										<td class="py-3 px-4 text-muted-foreground">{(userCurrentPage - 1) * userPageSize + idx + 1}</td>
-										<td class="py-3 px-4 font-bold flex items-center gap-2.5">
-											<div class="flex size-8 items-center justify-center rounded-full {u.isAdmin || u.role === 'admin' ? 'bg-purple-500/20 text-purple-700 dark:text-purple-300 ring-2 ring-purple-500/30' : 'bg-primary/10 text-primary'} text-xs font-black">
+									<tr class="h-10 hover:bg-muted/10 transition">
+										<td class="px-3 text-muted-foreground">{(userCurrentPage - 1) * userPageSize + idx + 1}</td>
+										<td class="px-3">
+											<div class="flex items-center gap-2">
+												<div class="flex size-6 shrink-0 items-center justify-center rounded-full {u.isAdmin || u.role === 'admin' ? 'bg-purple-500/20 text-purple-700 dark:text-purple-300' : 'bg-primary/10 text-primary'} text-[10px] font-black">
 												{u.username.charAt(0).toUpperCase()}
-											</div>
-											<div>
-												<div class="flex items-center gap-1.5">
-													<button onclick={() => openUserDrilldown(u)} class="hover:underline text-foreground font-extrabold text-xs">
-														{u.username}
-													</button>
-													{#if u.isAdmin || u.role === 'admin'}
-														<span class="inline-flex items-center gap-1 rounded-full bg-purple-500/15 border border-purple-500/30 px-2 py-0.5 text-[9px] font-black text-purple-700 dark:text-purple-300">
-															<Shield class="size-2.5" /> แอดมิน (Admin)
-														</span>
-													{:else}
-														<span class="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 text-[9px] font-bold text-emerald-700 dark:text-emerald-400">
-															ผู้เรียน (Learner)
-														</span>
-													{/if}
 												</div>
-												<span class="text-[10px] text-muted-foreground block font-mono">ID: #{u.id} • {u.isAdmin || u.role === 'admin' ? 'Role: Administrator' : 'Role: Student / Learner'}</span>
-											</div>
+												<button onclick={() => openUserDrilldown(u)} class="font-semibold text-foreground hover:underline">{u.username}</button>
+												<span class="text-[10px] text-muted-foreground">#{u.id} · {u.isAdmin || u.role === 'admin' ? 'แอดมิน' : 'ผู้เรียน'}</span>
+												{#if !u.isAdmin && u.avgGop !== null && u.avgGop < 70}
+													<span class="text-[10px] font-semibold text-rose-600">ต้องดูแล</span>
+												{/if}
+												</div>
 										</td>
-										<td class="py-3 px-4 text-right font-mono font-bold text-yellow-600">{u.xp}</td>
-										<td class="py-3 px-4 text-right font-mono font-bold text-orange-600">{u.streak} 🔥</td>
-										<td class="py-3 px-4 text-right font-mono font-bold text-emerald-600">{u.totalCompleted} ด่าน</td>
-										<td class="py-3 px-4 text-right text-muted-foreground">{fmtDate(u.lastPracticed)}</td>
-										<td class="py-3 px-4 text-center">
-											<div class="flex items-center justify-center gap-2">
+										<td class="px-3 text-right font-mono tabular-nums font-bold {u.avgGop !== null && u.avgGop < 70 ? 'text-rose-600' : 'text-foreground'}">{u.avgGop === null ? '—' : `${u.avgGop.toFixed(1)}%`}</td>
+										<td class="px-3 text-right font-mono tabular-nums text-muted-foreground">{u.avgPer === null ? '—' : `${u.avgPer.toFixed(1)}%`}</td>
+										<td class="px-3 text-right font-mono tabular-nums">{u.streak}</td>
+										<td class="px-3 text-right font-mono tabular-nums text-emerald-600">{u.totalCompleted}</td>
+										<td class="px-3 text-right text-muted-foreground">{fmtDate(u.lastPracticed)}</td>
+										<td class="px-3 text-right">
+											<div class="flex items-center justify-end gap-2">
 												<button
 													onclick={() => openUserDrilldown(u)}
-													class="rounded-lg bg-primary/10 hover:bg-primary/20 text-primary px-2.5 py-1 text-xs font-bold transition"
+													class="font-semibold text-primary hover:underline"
 												>
-													<Eye class="size-3.5 inline mr-1" /> ดูข้อมูล
+													ดู
 												</button>
 												{#if !u.isAdmin && u.role !== 'admin'}
 													<form method="POST" action="?/impersonate" class="inline">
 														<input type="hidden" name="targetUserId" value={u.id} />
 														<button
 															type="submit"
-															class="rounded-lg border hover:bg-muted px-2.5 py-1 text-xs font-bold transition cursor-pointer"
+															class="font-semibold text-muted-foreground hover:text-foreground cursor-pointer"
 															title="สวมบทบาทดูหน้า Dashboard ของผู้เรียนคนนี้"
 														>
-															<UserCheck class="size-3.5 inline mr-1 text-blue-500" /> ดู Dashboard
+															<UserCheck class="size-3.5 inline mr-1 text-blue-500" /> สลับมุมมอง
 														</button>
 													</form>
 												{/if}
@@ -1193,7 +1425,7 @@
 
 			{#if activeTab === 'stages'}
 				<!-- STAGES MANAGEMENT VIEW -->
-				<div class="rounded-3xl border bg-card p-6 shadow-xs space-y-4">
+				<div class="rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-card p-4 shadow-xs space-y-3">
 					<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
 						<div>
 							<h2 class="text-base font-extrabold text-foreground">วิเคราะห์แบบฝึกหัด & ด่าน (Exercise Stages)</h2>
@@ -1242,39 +1474,49 @@
 						</div>
 					{/if}
 
-					<div class="overflow-x-auto rounded-2xl border">
+					<div class="overflow-x-auto rounded-lg border">
 						<table class="w-full text-left text-xs">
 							<thead class="border-b bg-muted/30 font-bold uppercase tracking-wider text-muted-foreground">
 								<tr>
-									<th class="py-3 px-4">ด่าน</th>
-									<th class="py-3 px-4">ชื่อด่าน & หมวดหมู่</th>
-									<th class="py-3 px-4 text-center">เข้าดู (Views)</th>
-									<th class="py-3 px-4 text-center">ผ่าน (Passed)</th>
-									<th class="py-3 px-4 text-center">ไม่ผ่าน (Failed)</th>
-									<th class="py-3 px-4 text-center">ยังไม่เปิดดู</th>
-									<th class="py-3 px-4 text-center">Pass Rate</th>
-									<th class="py-3 px-4 text-center">การจัดการ</th>
+									<th class="h-9 px-3">ด่าน</th>
+									<th class="h-9 px-3">ชื่อด่าน & หมวดหมู่</th>
+									<th class="h-9 px-3 text-right">คำ</th>
+									<th class="h-9 px-3 text-right">เข้าดู</th>
+									<th class="h-9 px-3 text-right">Drop</th>
+									<th class="h-9 px-3 text-right">ผ่าน %</th>
+									<th class="h-9 px-3 text-right">สถานะ</th>
+									<th class="h-9 px-3 text-right">แก้ไข</th>
 								</tr>
 							</thead>
 							<tbody class="divide-y">
 								{#each filteredStages as st (st.id)}
-									<tr class="hover:bg-muted/10 transition">
-										<td class="py-3 px-4 font-mono font-bold">{st.id}</td>
-										<td class="py-3 px-4">
+									<tr class="h-10 hover:bg-muted/10 transition">
+										<td class="px-3 font-mono text-muted-foreground">{st.id}</td>
+										<td class="px-3">
 											<div class="font-extrabold text-foreground">{st.title}</div>
 											<div class="text-[10px] text-muted-foreground">{st.category}</div>
 										</td>
-										<td class="py-3 px-4 text-center font-mono font-bold text-blue-600">{st.stats.totalViews}</td>
-										<td class="py-3 px-4 text-center font-mono font-bold text-emerald-600">{st.stats.totalPassed}</td>
-										<td class="py-3 px-4 text-center font-mono font-bold text-rose-600">{st.stats.totalFailed}</td>
-										<td class="py-3 px-4 text-center font-mono text-muted-foreground">{st.stats.unopenedCount}</td>
-										<td class="py-3 px-4 text-center font-mono font-bold text-emerald-600">{st.stats.passRate}%</td>
-										<td class="py-3 px-4 text-center">
+										<td class="px-3 text-right font-mono tabular-nums">{st.wordsCount}</td>
+										<td class="px-3 text-right font-mono tabular-nums text-blue-600">{st.stats.totalViews}</td>
+										<td class="px-3 text-right font-mono tabular-nums text-rose-600">{st.stats.dropRate}%</td>
+										<td class="px-3 text-right font-mono tabular-nums font-bold text-emerald-600">{st.stats.passRate}%</td>
+										<td class="px-3 text-right">
+											<form method="POST" action="?/toggleStageActive" class="inline">
+												<input type="hidden" name="stageId" value={st.id} />
+												<button
+													type="submit"
+													class="font-semibold {st.isActive ? 'text-emerald-700 dark:text-emerald-400' : 'text-muted-foreground'} hover:underline"
+												>
+													{st.isActive ? 'เปิด' : 'ปิด'}
+												</button>
+											</form>
+										</td>
+										<td class="px-3 text-right">
 											<button
 												onclick={() => (editingStage = { ...st })}
-												class="rounded-lg bg-primary/10 hover:bg-primary/20 text-primary px-2.5 py-1 text-xs font-bold transition"
+												class="font-semibold text-primary hover:underline"
 											>
-												ดู & แก้ไข
+												แก้ไข
 											</button>
 										</td>
 									</tr>
@@ -1299,7 +1541,7 @@
 									<div class="text-[11px] font-bold uppercase tracking-wider text-primary">Pedagogical Intelligence & Analytics Engine</div>
 									<h2 class="text-lg font-black text-foreground">ระบบวิเคราะห์การเรียนรู้ภาษาจีนขั้นสูง (Learning Analytics Engine)</h2>
 									<p class="text-xs text-muted-foreground">
-										ขับเคลื่อนด้วยข้อมูล xAPI Telemetry & Goodness of Pronunciation (GOP) เพื่อปรับปรุงหลักสูตรและการสอนอย่างแม่นยำ
+										ขับเคลื่อนด้วยผลประเมิน GOP ที่ฐานข้อมูลระบุโหมดฝึก เพื่อแยกวิเคราะห์การฝึก Pitch และ Quest
 									</p>
 								</div>
 							</div>
@@ -1311,7 +1553,138 @@
 						</div>
 					</div>
 
+					<section class="grid grid-cols-1 gap-3 md:grid-cols-3" aria-label="สถิติการฝึกแยกตามโหมด">
+						<div class="rounded-2xl border border-blue-200/80 bg-blue-50/60 p-4 dark:border-blue-900/80 dark:bg-blue-950/20">
+							<div class="flex items-center justify-between text-xs font-bold text-blue-700 dark:text-blue-400">
+								<span>Quest · ฝึกแบบด่าน</span><span>30 วันล่าสุด</span>
+							</div>
+							<div class="mt-2 flex items-baseline gap-2">
+								<strong class="font-mono tabular-nums text-2xl text-foreground">{data.practiceBreakdown.summary.stage.attempts}</strong>
+								<span class="text-[11px] text-muted-foreground">ครั้ง</span>
+							</div>
+							<div class="mt-1 text-[11px] text-muted-foreground">
+								GOP <strong class="font-mono text-blue-700 dark:text-blue-400">{data.practiceBreakdown.summary.stage.avgScore === null ? '—' : `${data.practiceBreakdown.summary.stage.avgScore}%`}</strong>
+								· {data.practiceBreakdown.summary.stage.learners} ผู้เรียน · {data.practiceBreakdown.summary.stage.stages} ด่าน
+							</div>
+						</div>
+						<div class="rounded-2xl border border-violet-200/80 bg-violet-50/60 p-4 dark:border-violet-900/80 dark:bg-violet-950/20">
+							<div class="flex items-center justify-between text-xs font-bold text-violet-700 dark:text-violet-400">
+								<span>Pitch · ฝึกแบบคำ</span><span>30 วันล่าสุด</span>
+							</div>
+							<div class="mt-2 flex items-baseline gap-2">
+								<strong class="font-mono tabular-nums text-2xl text-foreground">{data.practiceBreakdown.summary.word.attempts}</strong>
+								<span class="text-[11px] text-muted-foreground">ครั้ง</span>
+							</div>
+							<div class="mt-1 text-[11px] text-muted-foreground">
+								GOP <strong class="font-mono text-violet-700 dark:text-violet-400">{data.practiceBreakdown.summary.word.avgScore === null ? '—' : `${data.practiceBreakdown.summary.word.avgScore}%`}</strong>
+								· {data.practiceBreakdown.summary.word.learners} ผู้เรียน · {data.practiceBreakdown.summary.word.words} คำ
+							</div>
+						</div>
+						<div class="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4 dark:border-slate-800/80 dark:bg-slate-900/30">
+							<div class="flex items-center justify-between text-xs font-bold text-muted-foreground">
+								<span>ยังไม่ทราบโหมด</span><span>30 วันล่าสุด</span>
+							</div>
+							<div class="mt-2 flex items-baseline gap-2">
+								<strong class="font-mono tabular-nums text-2xl text-foreground">{data.practiceBreakdown.summary.unclassified.attempts}</strong>
+								<span class="text-[11px] text-muted-foreground">ครั้ง</span>
+							</div>
+							<p class="mt-1 text-[11px] text-muted-foreground">ไม่นำไปรวมกับ Quest หรือ Pitch</p>
+						</div>
+					</section>
+
+					<section class="rounded-2xl border bg-card p-4 shadow-xs" aria-label="กราฟเปรียบเทียบผลการฝึก">
+						<div class="mb-4 flex flex-wrap items-start justify-between gap-2">
+							<div>
+								<h3 class="text-sm font-extrabold text-foreground">เปรียบเทียบการฝึกใน 30 วันล่าสุด</h3>
+								<p class="mt-0.5 text-[11px] text-muted-foreground">จำนวนครั้งประเมินและคะแนน GOP เฉลี่ย แยก Quest กับ Pitch</p>
+							</div>
+							<div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-semibold text-muted-foreground">
+								<span class="flex items-center gap-1.5"><span class="size-2.5 rounded-sm bg-blue-600"></span>Quest · แบบด่าน</span>
+								<span class="flex items-center gap-1.5"><span class="size-2.5 rounded-sm bg-violet-600"></span>Pitch · แบบคำ</span>
+							</div>
+						</div>
+
+						{#if data.practiceBreakdown.summary.stage.attempts + data.practiceBreakdown.summary.word.attempts === 0}
+							<div class="rounded-xl border border-dashed bg-muted/20 px-4 py-8 text-center">
+								<BarChart3 class="mx-auto size-6 text-muted-foreground/70" />
+								<p class="mt-2 text-xs font-semibold text-foreground">ยังไม่มีผลประเมินในช่วง 30 วันล่าสุด</p>
+								<p class="mt-1 text-[11px] text-muted-foreground">กราฟจะแสดงข้อมูลหลังมีผลฝึกที่บันทึกแยกเป็น Quest หรือ Pitch</p>
+							</div>
+						{:else}
+							<div class="space-y-5">
+								{#each [
+									{ key: 'stage', label: 'Quest · แบบด่าน', color: 'bg-blue-600', textColor: 'text-blue-700 dark:text-blue-300', summary: data.practiceBreakdown.summary.stage },
+									{ key: 'word', label: 'Pitch · แบบคำ', color: 'bg-violet-600', textColor: 'text-violet-700 dark:text-violet-300', summary: data.practiceBreakdown.summary.word }
+								] as mode (mode.key)}
+									<div class="grid gap-2 sm:grid-cols-[135px_minmax(0,1fr)_minmax(0,1fr)] sm:items-center sm:gap-4">
+										<div class="text-xs font-bold {mode.textColor}">{mode.label}</div>
+										<div>
+											<div class="mb-1 flex items-baseline justify-between gap-2 text-[10px]">
+												<span class="text-muted-foreground">จำนวนครั้ง</span>
+												<strong class="font-mono tabular-nums text-foreground">{mode.summary.attempts}</strong>
+											</div>
+											<div
+												class="h-2.5 overflow-hidden rounded-full bg-muted"
+												role="progressbar"
+												aria-label="{mode.label}: จำนวนครั้งเทียบกับโหมดที่มีการฝึกมากที่สุด"
+												aria-valuemin="0"
+												aria-valuemax={practiceComparisonMax}
+												aria-valuenow={mode.summary.attempts}
+											>
+												<div class="h-full rounded-full {mode.color} transition-[width]" style="width: {Math.round((mode.summary.attempts / practiceComparisonMax) * 100)}%"></div>
+											</div>
+										</div>
+										<div>
+											<div class="mb-1 flex items-baseline justify-between gap-2 text-[10px]">
+												<span class="text-muted-foreground">GOP เฉลี่ย</span>
+												<strong class="font-mono tabular-nums text-foreground">{mode.summary.avgScore === null ? '—' : `${mode.summary.avgScore}%`}</strong>
+											</div>
+											<div
+												class="h-2.5 overflow-hidden rounded-full bg-muted"
+												role="progressbar"
+												aria-label="{mode.label}: GOP เฉลี่ย"
+												aria-valuemin="0"
+												aria-valuemax="100"
+												aria-valuenow={mode.summary.avgScore ?? 0}
+											>
+												{#if mode.summary.avgScore !== null}
+													<div class="h-full rounded-full {mode.color} opacity-70 transition-[width]" style="width: {Math.max(0, Math.min(100, mode.summary.avgScore))}%"></div>
+												{/if}
+											</div>
+										</div>
+									</div>
+								{/each}
+								<div class="grid gap-1 border-t pt-3 text-[10px] text-muted-foreground sm:grid-cols-2 sm:gap-4">
+									<p>จำนวนครั้ง: สเกลเทียบกับโหมดที่มีผลประเมินมากกว่าในสองโหมดนี้</p>
+									<p>GOP: สเกล 0–100; ไม่แสดงแท่งเมื่อไม่มีข้อมูล</p>
+								</div>
+							</div>
+						{/if}
+					</section>
+
+					<div class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-muted/20 p-3">
+						<div>
+							<div class="text-xs font-extrabold text-foreground">ดูรายละเอียดการวิเคราะห์ตามโหมด</div>
+							<div class="mt-0.5 text-[11px] text-muted-foreground">เมทริกซ์เสียงและผลวรรณยุกต์จะคำนวณจากผลประเมินของโหมดที่เลือกเท่านั้น</div>
+						</div>
+						<div class="flex rounded-xl border bg-background p-1">
+							<button
+								type="button"
+								onclick={() => (learningPracticeMode = 'stage')}
+								aria-pressed={learningPracticeMode === 'stage'}
+								class="rounded-lg px-3 py-1.5 text-xs font-bold transition {learningPracticeMode === 'stage' ? 'bg-blue-600 text-white shadow-xs' : 'text-muted-foreground hover:text-foreground'}"
+							>Quest · แบบด่าน</button>
+							<button
+								type="button"
+								onclick={() => (learningPracticeMode = 'word')}
+								aria-pressed={learningPracticeMode === 'word'}
+								class="rounded-lg px-3 py-1.5 text-xs font-bold transition {learningPracticeMode === 'word' ? 'bg-violet-600 text-white shadow-xs' : 'text-muted-foreground hover:text-foreground'}"
+							>Pitch · แบบคำ</button>
+						</div>
+					</div>
+
 					<!-- MODULE 1: DROP-OFF FUNNEL ANALYSIS -->
+					{#if learningPracticeMode === 'stage'}
 					<section class="rounded-3xl border bg-card p-6 shadow-xs space-y-5">
 						<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4">
 							<div>
@@ -1326,7 +1699,7 @@
 							</div>
 							<div class="flex flex-wrap items-center gap-2">
 								<span class="rounded-full bg-rose-500/10 text-rose-700 dark:text-rose-400 font-mono font-bold text-xs px-3 py-1 border border-rose-500/20">
-									อัตราหลุดเฉลี่ยทั้งระบบ: {data.advancedAnalytics?.dropOffFunnel?.overallDropOffRate ?? 28}%
+									อัตราหลุด Quest: {activeLearningAnalytics?.dropOffFunnel?.totalViews ? `${activeLearningAnalytics.dropOffFunnel.overallDropOffRate}%` : '—'}
 								</span>
 								<div class="flex rounded-xl border bg-muted/30 p-0.5 text-[11px]">
 									{#each [('all' as const), 1, 2, 3] as lvl (lvl)}
@@ -1416,7 +1789,7 @@
 										</tr>
 									</thead>
 									<tbody class="divide-y">
-										{#each (data.advancedAnalytics?.dropOffFunnel?.bottleneckStages ?? []) as b (b.stageId)}
+										{#each (activeLearningAnalytics?.dropOffFunnel?.bottleneckStages ?? []) as b (b.stageId)}
 											{@const matchingStage = data.stages.find((s) => s.id === b.stageId)}
 											{#if funnelFilterHsk === 'all' || (matchingStage && matchingStage.hskLevel === funnelFilterHsk) || b.stageId.includes(`hsk${funnelFilterHsk}`)}
 												<tr class="hover:bg-muted/10 transition">
@@ -1462,6 +1835,12 @@
 							</div>
 						</div>
 					</section>
+					{:else}
+						<section class="rounded-3xl border border-violet-200/80 bg-violet-50/50 p-5 dark:border-violet-900/70 dark:bg-violet-950/15">
+							<h3 class="text-sm font-extrabold text-violet-800 dark:text-violet-300">Pitch · สถิติการฝึกแบบคำ</h3>
+							<p class="mt-1 text-xs leading-relaxed text-muted-foreground">Pitch ไม่มีขั้นตอนเปิดดูและผ่านด่าน จึงไม่มี Drop-off Funnel โดยตัวเลขด้านบนและเมทริกซ์ด้านล่างใช้ผลประเมินจากการฝึกแบบคำเท่านั้น</p>
+						</section>
+					{/if}
 
 					<!-- MODULE 2: PHONEME SUBSTITUTION MATRIX & MINIMAL PAIRS -->
 					<section class="rounded-3xl border bg-card p-6 shadow-xs space-y-5">
@@ -1469,7 +1848,7 @@
 							<div>
 								<div class="flex items-center gap-2 font-extrabold text-sm text-foreground">
 									<BrainCircuit class="size-4.5 text-amber-500" />
-									<span>2. Phoneme Substitution Matrix & Minimal Pairs (แผนที่ความสับสนของเสียงพยัญชนะ/สระจีน)</span>
+									<span>2. Phoneme Substitution Matrix & Minimal Pairs · {learningPracticeMode === 'stage' ? 'Quest' : 'Pitch'}</span>
 								</div>
 								<p class="text-xs text-muted-foreground mt-0.5">
 									<strong>ประโยชน์เชิงการสอน:</strong> สถิติเสียงที่คนไทยสับสนบ่อย เช่น <code>zh ↔ z</code>, <code>ch ↔ c</code>, <code>sh ↔ s</code>, <code>j ↔ q ↔ x</code> • 
@@ -1547,7 +1926,7 @@
 								</h4>
 
 								<div class="space-y-2.5 text-xs">
-									{#each (data.advancedAnalytics?.phonemeSubstitutionMatrix?.minimalPairs ?? []) as mp, idx (idx)}
+									{#each (activeLearningAnalytics?.phonemeSubstitutionMatrix?.minimalPairs ?? []) as mp, idx (idx)}
 										<div class="rounded-2xl border bg-card p-3.5 space-y-2 hover:shadow-md transition">
 											<div class="flex items-center justify-between">
 												<div class="flex items-center gap-2">
@@ -1621,7 +2000,7 @@
 							<div>
 								<div class="flex items-center gap-2 font-extrabold text-sm text-foreground">
 									<Activity class="size-4.5 text-purple-500" />
-									<span>3. Tone Confusion Heatmap & Pitch Curve Feedback (วิเคราะห์ความผิดพลาดระดับเสียงวรรณยุกต์)</span>
+									<span>3. Tone Confusion Heatmap & Pitch Curve Feedback · {learningPracticeMode === 'stage' ? 'Quest' : 'Pitch'}</span>
 								</div>
 								<p class="text-xs text-muted-foreground mt-0.5">
 									<strong>ประโยชน์เชิงการสอน:</strong> วิเคราะห์ความผิดพลาดระดับเสียงวรรณยุกต์ (Tone Pitch Contour) • 
@@ -1659,7 +2038,7 @@
 											</tr>
 										</thead>
 										<tbody class="divide-y font-mono">
-											{#each (data.advancedAnalytics?.toneConfusionHeatmap?.matrix ?? []) as tm (tm.targetTone)}
+											{#each (activeLearningAnalytics?.toneConfusionHeatmap?.matrix ?? []) as tm (tm.targetTone)}
 												<tr>
 													<td class="py-3 px-3 text-left font-bold font-sans text-foreground">
 														{tm.label}
@@ -1688,7 +2067,7 @@
 										<span>ข้อค้นพบสถิติเสียงวรรณยุกต์คนไทย:</span>
 									</div>
 									<p class="text-[11px] leading-relaxed">
-										{data.advancedAnalytics?.toneConfusionHeatmap?.keyFinding || 'กำลังประมวลผลสถิติเสียงวรรณยุกต์จากฐานข้อมูล...'}
+										{activeLearningAnalytics?.toneConfusionHeatmap?.keyFinding || 'กำลังประมวลผลสถิติเสียงวรรณยุกต์จากฐานข้อมูล...'}
 									</p>
 								</div>
 							</div>
@@ -1785,10 +2164,11 @@
 									<strong>ประโยชน์เชิงการสอน:</strong> เปรียบเทียบคะแนน GOP ของผู้เรียนที่กดฟังตัวอย่าง vs ไม่ฟัง • 
 									<span class="text-blue-600 font-semibold">วิธีนำข้อมูลไปใช้:</span> กำหนดว่าด่านยากควรบังคับให้ฟังตัวอย่างก่อนเปิดไมค์หรือไม่ (Audio Gate Policy)
 								</p>
+								<p class="text-[10px] text-amber-700 dark:text-amber-400">คะแนนประเมินกรองตามโหมดที่เลือก แต่ event การฟังเป็นข้อมูลรวมรายผู้ใช้และยังระบุโหมดไม่ได้</p>
 							</div>
 							<div class="flex items-center gap-2">
 								<span class="rounded-full bg-blue-500/10 text-blue-700 dark:text-blue-300 font-bold text-xs px-3 py-1 border border-blue-500/20">
-									Delta GOP: {(data.advancedAnalytics?.lq5ListeningImpact?.deltaGop ?? 0) > 0 ? '+' : ''}{data.advancedAnalytics?.lq5ListeningImpact?.deltaGop ?? 0}% | Tone: {(data.advancedAnalytics?.lq5ListeningImpact?.deltaTone ?? 0) > 0 ? '+' : ''}{data.advancedAnalytics?.lq5ListeningImpact?.deltaTone ?? 0}%
+									Delta GOP: {(activeLearningAnalytics?.lq5ListeningImpact?.deltaGop ?? 0) > 0 ? '+' : ''}{activeLearningAnalytics?.lq5ListeningImpact?.deltaGop ?? 0}% | Tone: {(activeLearningAnalytics?.lq5ListeningImpact?.deltaTone ?? 0) > 0 ? '+' : ''}{activeLearningAnalytics?.lq5ListeningImpact?.deltaTone ?? 0}%
 								</span>
 							</div>
 						</div>
@@ -1801,26 +2181,26 @@
 										<span>🎧</span> กลุ่มที่กดฟังเสียงตัวอย่างก่อนพูด (With Listening)
 									</span>
 									<span class="rounded bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 px-2 py-0.5 text-[10px] font-bold">
-										Sample: {data.advancedAnalytics?.lq5ListeningImpact?.withListening?.sampleCount ?? 0} ครั้ง
+										Sample: {activeLearningAnalytics?.lq5ListeningImpact?.withListening?.sampleCount ?? 0} ครั้ง
 									</span>
 								</div>
 								<div class="grid grid-cols-3 gap-2 text-center">
 									<div class="p-2.5 rounded-xl bg-card border">
 										<div class="text-[10px] text-muted-foreground">คะแนน GOP</div>
 										<div class="text-lg font-black text-emerald-600 font-mono">
-											{data.advancedAnalytics?.lq5ListeningImpact?.withListening?.avgGop ?? 0}%
+											{activeLearningAnalytics?.lq5ListeningImpact?.withListening?.avgGop ?? 0}%
 										</div>
 									</div>
 									<div class="p-2.5 rounded-xl bg-card border">
 										<div class="text-[10px] text-muted-foreground">วรรณยุกต์แม่นยำ</div>
 										<div class="text-lg font-black text-emerald-600 font-mono">
-											{data.advancedAnalytics?.lq5ListeningImpact?.withListening?.toneAccuracy ?? 0}%
+											{activeLearningAnalytics?.lq5ListeningImpact?.withListening?.toneAccuracy ?? 0}%
 										</div>
 									</div>
 									<div class="p-2.5 rounded-xl bg-card border">
 										<div class="text-[10px] text-muted-foreground">ผ่านครั้งแรก</div>
 										<div class="text-lg font-black text-emerald-600 font-mono">
-											{data.advancedAnalytics?.lq5ListeningImpact?.withListening?.passRate ?? 0}%
+											{activeLearningAnalytics?.lq5ListeningImpact?.withListening?.passRate ?? 0}%
 										</div>
 									</div>
 								</div>
@@ -1836,26 +2216,26 @@
 										<span>🎙️</span> กลุ่มที่กดพูดทันทีโดยไม่ฟัง (Direct Speech)
 									</span>
 									<span class="rounded bg-amber-500/20 text-amber-800 dark:text-amber-200 px-2 py-0.5 text-[10px] font-bold">
-										Sample: {data.advancedAnalytics?.lq5ListeningImpact?.withoutListening?.sampleCount ?? 0} ครั้ง
+										Sample: {activeLearningAnalytics?.lq5ListeningImpact?.withoutListening?.sampleCount ?? 0} ครั้ง
 									</span>
 								</div>
 								<div class="grid grid-cols-3 gap-2 text-center">
 									<div class="p-2.5 rounded-xl bg-card border">
 										<div class="text-[10px] text-muted-foreground">คะแนน GOP</div>
 										<div class="text-lg font-black text-amber-600 font-mono">
-											{data.advancedAnalytics?.lq5ListeningImpact?.withoutListening?.avgGop ?? 0}%
+											{activeLearningAnalytics?.lq5ListeningImpact?.withoutListening?.avgGop ?? 0}%
 										</div>
 									</div>
 									<div class="p-2.5 rounded-xl bg-card border">
 										<div class="text-[10px] text-muted-foreground">วรรณยุกต์แม่นยำ</div>
 										<div class="text-lg font-black text-amber-600 font-mono">
-											{data.advancedAnalytics?.lq5ListeningImpact?.withoutListening?.toneAccuracy ?? 0}%
+											{activeLearningAnalytics?.lq5ListeningImpact?.withoutListening?.toneAccuracy ?? 0}%
 										</div>
 									</div>
 									<div class="p-2.5 rounded-xl bg-card border">
 										<div class="text-[10px] text-muted-foreground">ผ่านครั้งแรก</div>
 										<div class="text-lg font-black text-amber-600 font-mono">
-											{data.advancedAnalytics?.lq5ListeningImpact?.withoutListening?.passRate ?? 0}%
+											{activeLearningAnalytics?.lq5ListeningImpact?.withoutListening?.passRate ?? 0}%
 										</div>
 									</div>
 								</div>
@@ -1874,7 +2254,7 @@
 										<span>นโยบายการบังคับฟังตัวอย่างก่อนเปิดไมค์ (Audio Sample Gate Policy):</span>
 									</div>
 									<p class="text-[11px] text-muted-foreground mt-0.5">
-										{data.advancedAnalytics?.lq5ListeningImpact?.pedagogicalTakeaway || 'กำลังวิเคราะห์ผลกระทบของการฟังตัวอย่างจากฐานข้อมูล...'}
+										{activeLearningAnalytics?.lq5ListeningImpact?.pedagogicalTakeaway || 'กำลังวิเคราะห์ผลกระทบของการฟังตัวอย่างจากฐานข้อมูล...'}
 									</p>
 								</div>
 								<div class="flex items-center gap-2">
@@ -1907,6 +2287,7 @@
 									<span>5. Mistake Repetition Rate & High-Friction Vocab (วัดประสิทธิผลของระบบทบทวน)</span>
 								</div>
 								<p class="text-xs text-muted-foreground mt-0.5">
+									สถิติคำผิดเดิมไม่ได้บันทึกโหมดฝึกในฐานข้อมูล จึงเป็นภาพรวมและไม่ถูกแยกตามตัวเลือก Pitch/Quest • 
 									<strong>ประโยชน์เชิงการสอน:</strong> ตรวจสอบว่าคำศัพท์ที่เคยผิดในประวัติ เมื่อวนกลับมาให้ทำซ้ำในรอบถัดไป มีอัตราการพูดถูกเพิ่มขึ้นกี่ % • 
 									<span class="text-emerald-600 font-semibold">วิธีนำข้อมูลไปใช้:</span> จัดชุดทบทวนเฉพาะจุด (Spaced Repetition Remedial Deck)
 								</p>
@@ -1926,11 +2307,11 @@
 						<div class="space-y-2">
 							<div class="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
 								<span>อัตราความก้าวหน้าในการทบทวนซ้ำ (Spaced Repetition Mastery Recovery Curve):</span>
-								<span class="text-emerald-600 font-bold">อัตรากู้คืนความแม่นยำรวม: {data.advancedAnalytics?.mistakeRepetition?.masteryRecoveryRate ?? 0}%</span>
+								<span class="text-emerald-600 font-bold">อัตรากู้คืนความแม่นยำรวม: {activeLearningAnalytics?.mistakeRepetition?.masteryRecoveryRate ?? 0}%</span>
 							</div>
 
 							<div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center text-xs">
-								{#each (data.advancedAnalytics?.mistakeRepetition?.spacedRepetitionFunnel ?? []) as step, idx (idx)}
+								{#each (activeLearningAnalytics?.mistakeRepetition?.spacedRepetitionFunnel ?? []) as step, idx (idx)}
 									<div class="rounded-2xl border bg-card p-3.5 space-y-1.5 shadow-xs">
 										<div class="text-[10px] font-bold text-muted-foreground">{step.stage}</div>
 										<div class="text-xl font-black font-mono {idx === 0 ? 'text-rose-600' : idx === 1 ? 'text-amber-600' : 'text-emerald-600'}">
@@ -1965,7 +2346,7 @@
 										</tr>
 									</thead>
 									<tbody class="divide-y">
-										{#each (data.advancedAnalytics?.mistakeRepetition?.highFrictionWords ?? []) as w (w.hanzi)}
+										{#each (activeLearningAnalytics?.mistakeRepetition?.highFrictionWords ?? []) as w (w.hanzi)}
 											<tr class="hover:bg-muted/10 transition">
 												<td class="py-3 px-3">
 													<span class="text-base font-black text-foreground">{w.hanzi}</span>
@@ -2132,7 +2513,7 @@
 			<!-- Modal Body (Scrollable) -->
 			<div class="flex-1 overflow-y-auto p-6 space-y-6">
 				<!-- Quick KPI strip -->
-				<div class="grid grid-cols-4 gap-3 text-center">
+				<div class="grid grid-cols-3 gap-3 text-center">
 					<div class="rounded-2xl border bg-muted/20 p-3">
 						<div class="text-[11px] text-muted-foreground">XP สะสม</div>
 						<div class="text-xl font-black text-yellow-600 font-mono">{selectedUserModal.xp}</div>
@@ -2140,10 +2521,6 @@
 					<div class="rounded-2xl border bg-muted/20 p-3">
 						<div class="text-[11px] text-muted-foreground">Streak ปัจจุบัน</div>
 						<div class="text-xl font-black text-orange-600 font-mono">{selectedUserModal.streak} วัน 🔥</div>
-					</div>
-					<div class="rounded-2xl border bg-muted/20 p-3">
-						<div class="text-[11px] text-muted-foreground">พลังชีวิต (Hearts)</div>
-						<div class="text-xl font-black text-rose-600 font-mono">{selectedUserModal.hearts} ❤️</div>
 					</div>
 					<div class="rounded-2xl border bg-muted/20 p-3">
 						<div class="text-[11px] text-muted-foreground">ด่านที่ผ่านแล้ว</div>
@@ -2305,7 +2682,7 @@
 <!-- 5. STAGE EDIT MODAL (NEON + TURSO DB PERSISTENCE) -->
 {#if editingStage}
 	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-		<div class="relative w-full max-w-lg rounded-3xl border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+		<div class="relative w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-3xl border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200">
 			<div class="flex items-center justify-between border-b pb-3 mb-4">
 				<div>
 					<div class="text-[11px] font-bold text-primary uppercase tracking-wider">แก้ไขข้อมูลด่านแบบฝึกหัด</div>
@@ -2356,6 +2733,30 @@
 						rows="2"
 						class="w-full rounded-xl border border-input bg-background p-2.5 text-xs text-foreground outline-hidden focus:ring-1 focus:ring-ring"
 					></textarea>
+				</div>
+
+				<div class="space-y-2">
+					<div>
+						<Label for="edit-challenges">เนื้อหาโจทย์และคำศัพท์ในด่าน</Label>
+						<p class="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+							แก้ JSON ได้ทั้งชุด: คำศัพท์ (hanzi, pinyin, thai, english, tone, category), ชนิดโจทย์
+							(speak, listen_speak, translate, sentence_build), ตัวเลือก และประโยคฝึกอ่าน
+							สำหรับ translate ให้แก้ choices และ correctChoiceIndex ให้ตรงกับคำตอบด้วย
+						</p>
+					</div>
+					<textarea
+						id="edit-challenges"
+						name="challengeJson"
+						bind:value={editingStage.challengeJson}
+						rows="18"
+						spellcheck="false"
+						required
+						class="w-full resize-y rounded-xl border border-input bg-muted/20 p-3 font-mono text-[11px] leading-relaxed text-foreground outline-hidden focus:ring-1 focus:ring-ring"
+					></textarea>
+					<div class="text-[10px] text-muted-foreground">
+						จำนวนโจทย์: {(() => { try { return JSON.parse(editingStage.challengeJson).length; } catch { return 'JSON ไม่ถูกต้อง'; } })()}
+						• ระบบจะตรวจความถูกต้องก่อนบันทึก และใช้เนื้อหานี้ทั้งหน้าแผนที่กับหน้าเล่น
+					</div>
 				</div>
 
 				<div class="flex items-center gap-2 pt-1">

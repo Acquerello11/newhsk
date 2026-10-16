@@ -14,13 +14,15 @@ import {
 	recordAuditLog,
 	getAuditLogs,
 	getPronunciationPhonemeErrorStats,
+	getParticipationTrend,
+	getPracticeBreakdown,
 	getDiagnosticAnalytics,
 	getAdvancedLearningAnalytics,
 	isUserAdmin,
 	getSystemSetting,
 	setSystemSetting
 } from '$lib/server/db';
-import { ALL_QUEST_STAGES } from '$lib/data/questLevels';
+import { ALL_QUEST_STAGES, parseQuestChallenges } from '$lib/data/questLevels';
 import { TRACKS, units } from '$lib/data/lessons';
 import { generateRemedialVocab } from '$lib/analytics/remedialEngine';
 import { HSK1_VOCAB_PRESETS } from '$lib/vocabLoader';
@@ -56,8 +58,11 @@ export const load: PageServerLoad = async (event) => {
 		stageOverrides,
 		auditLogs,
 		classPhonemeStats,
+		participationTrend,
+		practiceBreakdown,
 		selectedUserDetail,
-		advancedAnalytics,
+		questAnalytics,
+		pitchAnalytics,
 		listeningPolicy,
 		pitchSensitivity
 	] = await Promise.all([
@@ -68,8 +73,11 @@ export const load: PageServerLoad = async (event) => {
 		getStageOverrides(),
 		getAuditLogs(40),
 		getPronunciationPhonemeErrorStats(),
+		getParticipationTrend(),
+		getPracticeBreakdown(),
 		selectedUserId ? getUserFullDetail(selectedUserId) : Promise.resolve(null),
-		getAdvancedLearningAnalytics(),
+		getAdvancedLearningAnalytics('stage'),
+		getAdvancedLearningAnalytics('word'),
 		getSystemSetting('listening_policy', 'low_pass'),
 		getSystemSetting('pitch_sensitivity', 'standard')
 	]);
@@ -160,6 +168,13 @@ export const load: PageServerLoad = async (event) => {
 			originalDescription: s.description,
 			isActive: override?.isActive ?? true,
 			hasOverride: !!override,
+			challengeJson: JSON.stringify(
+				override?.contentJson
+					? parseQuestChallenges(override.contentJson) ?? s.challenges
+					: s.challenges,
+				null,
+				2
+			),
 			wordsCount: s.words.length,
 			wordsList: s.words.map((w) => ({ hanzi: w.hanzi, pinyin: w.pinyin, thai: w.thai })),
 			stats: {
@@ -220,7 +235,12 @@ export const load: PageServerLoad = async (event) => {
 		stages: enrichedStages,
 		auditLogs,
 		classPhonemeStats,
-		advancedAnalytics,
+		participationTrend,
+		practiceBreakdown,
+		learningAnalyticsByMode: {
+			stage: questAnalytics,
+			word: pitchAnalytics
+		},
 		listeningPolicy,
 		pitchSensitivity,
 		selectedUserId,
@@ -380,10 +400,19 @@ export const actions: Actions = {
 		const title = String(data.get('title') ?? '').trim();
 		const category = String(data.get('category') ?? '').trim();
 		const description = String(data.get('description') ?? '').trim();
+		const challengeJson = String(data.get('challengeJson') ?? '');
 		const isActive = data.get('isActive') === 'true' || data.get('isActive') === '1' || data.get('isActive') === 'on';
 
-		if (!stageId || !title) {
+		const sourceStage = ALL_QUEST_STAGES.find((stage) => stage.id === stageId);
+		if (!stageId || !sourceStage || !title) {
 			return fail(400, { error: 'ต้องระบุรหัสด่านและชื่อบทเรียน' });
+		}
+
+		const challenges = parseQuestChallenges(challengeJson);
+		if (!challenges) {
+			return fail(400, {
+				error: 'รูปแบบเนื้อหาโจทย์ไม่ถูกต้อง: ตรวจ JSON, ชนิดโจทย์, คำศัพท์, ตัวเลือก และคำตอบที่ถูกต้อง'
+			});
 		}
 
 		await saveStageOverride({
@@ -392,10 +421,38 @@ export const actions: Actions = {
 			category: category || 'ทั่วไป',
 			description,
 			isActive,
+			contentJson: JSON.stringify(challenges),
 			updatedBy: admin.username
 		});
 
 		return { success: true, savedStageId: stageId };
+	},
+
+	toggleStageActive: async ({ request, locals }) => {
+		const admin = locals.realAdmin || locals.user;
+		if (!admin?.isAdmin) {
+			throw error(403, 'Forbidden: Admin access required');
+		}
+
+		const data = await request.formData();
+		const stageId = String(data.get('stageId') ?? '').trim();
+		const stage = ALL_QUEST_STAGES.find((item) => item.id === stageId);
+		if (!stage) return fail(400, { error: 'ไม่พบรหัสด่านที่ต้องการเปลี่ยนสถานะ' });
+
+		const override = (await getStageOverrides())[stageId];
+		const isActive = !(override?.isActive ?? true);
+		await saveStageOverride({
+			stageId,
+			title: override?.title || stage.title,
+			category: override?.category || stage.category,
+			description: override?.description || stage.description,
+			isActive,
+			customWords: override?.customWords,
+			contentJson: override?.contentJson ?? JSON.stringify(stage.challenges),
+			updatedBy: admin.username
+		});
+
+		return { success: true, toggledStageId: stageId, isActive };
 	},
 
 	resetStageOverride: async ({ request, locals }) => {

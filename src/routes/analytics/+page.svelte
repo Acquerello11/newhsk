@@ -188,7 +188,7 @@
 					<div class="flex flex-wrap items-center gap-2">
 						<span class="inline-flex items-center gap-1.5 rounded-full border border-amber-500/25 bg-amber-500/10 px-3 py-1.5 text-xs font-bold text-amber-600 dark:text-amber-400">
 							<Flame class="size-3.5" />
-							{totalPracticedWords} คำที่ฝึกแล้ว
+							{totalPracticedWords} คำที่ฝึกด้วย Pitch
 						</span>
 						<span class="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400">
 							<TrendingUp class="size-3.5" />
@@ -219,7 +219,7 @@
 						<div class="h-full rounded-full bg-gradient-to-r from-primary to-amber-400 transition-all duration-700" style="width: {unlockProgressPercent}%"></div>
 					</div>
 					<div class="flex items-center justify-between text-[11px] text-muted-foreground">
-						<span>{totalPracticedWords} คำที่ฝึกแล้ว</span>
+						<span>{totalPracticedWords} คำที่ฝึกด้วย Pitch</span>
 						<span>เป้าหมาย {MIN_DIAGNOSTIC_WORDS} คำ</span>
 					</div>
 				</div>
@@ -245,7 +245,7 @@
 				เลือกระดับคำศัพท์ (HSK Levels)
 			</span>
 			<span class="text-xs text-muted-foreground">
-				ฝึกแล้ว <strong class="text-foreground">{totalPracticedWords}</strong> จาก {vocabOverview.totalWords} คำ
+				ฝึก Pitch แล้ว <strong class="text-foreground">{totalPracticedWords}</strong> จาก {vocabOverview.totalWords} คำ
 			</span>
 		</div>
 
@@ -263,7 +263,7 @@
 					</span>
 				</div>
 				<div class="mt-2 flex items-center justify-between text-xs">
-					<span class="text-muted-foreground">ฝึกแล้ว</span>
+					<span class="text-muted-foreground">Pitch แล้ว</span>
 					<span class="font-mono font-bold text-foreground">{totalPracticedWords} คำ</span>
 				</div>
 			</button>
@@ -283,7 +283,7 @@
 						</span>
 					</div>
 					<div class="mt-2 flex items-center justify-between text-xs">
-						<span class="text-muted-foreground">ฝึกแล้ว</span>
+						<span class="text-muted-foreground">Pitch แล้ว</span>
 						<span class="font-mono font-bold text-foreground">{hsk1.practicedCount}/{hsk1.totalWords}</span>
 					</div>
 				</button>
@@ -304,7 +304,7 @@
 						</span>
 					</div>
 					<div class="mt-2 flex items-center justify-between text-xs">
-						<span class="text-muted-foreground">ฝึกแล้ว</span>
+						<span class="text-muted-foreground">Pitch แล้ว</span>
 						<span class="font-mono font-bold text-foreground">{hsk2.practicedCount}/{hsk2.totalWords}</span>
 					</div>
 				</button>
@@ -325,12 +325,42 @@
 						</span>
 					</div>
 					<div class="mt-2 flex items-center justify-between text-xs">
-						<span class="text-muted-foreground">ฝึกแล้ว</span>
+						<span class="text-muted-foreground">Pitch แล้ว</span>
 						<span class="font-mono font-bold text-foreground">{hsk3.practicedCount}/{hsk3.totalWords}</span>
 					</div>
 				</button>
 			{/if}
 		</div>
+	</section>
+
+	<section class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+		<div class="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+			<div class="flex items-center gap-2 text-xs font-bold text-emerald-700 dark:text-emerald-400">
+				<Mic class="size-4" /> ฝึกคำเดี่ยว · Pitch
+			</div>
+			<div class="mt-2 flex items-baseline gap-3">
+				<strong class="font-mono tabular-nums text-2xl text-foreground">{data.practiceOverview.pitchAttempts}</strong>
+				<span class="text-xs text-muted-foreground">ครั้ง · {data.practiceOverview.pitchWords} คำ</span>
+			</div>
+			<p class="mt-1 text-[10px] text-muted-foreground">ใช้เฉพาะผลจากหน้า /pitch</p>
+		</div>
+		<div class="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4">
+			<div class="flex items-center gap-2 text-xs font-bold text-blue-700 dark:text-blue-400">
+				<Gamepad2 class="size-4" /> ฝึกในด่าน · Quest
+			</div>
+			<div class="mt-2 flex items-baseline gap-3">
+				<strong class="font-mono tabular-nums text-2xl text-foreground">{data.practiceOverview.questAttempts}</strong>
+				<span class="text-xs text-muted-foreground">ครั้ง · {data.practiceOverview.questWords} คำ</span>
+			</div>
+			<p class="mt-1 text-[10px] text-muted-foreground">ใช้เฉพาะผลจากหน้า /quest</p>
+		</div>
+		{#if data.practiceOverview.unclassifiedAttempts > 0}
+			<div class="rounded-2xl border border-slate-300 bg-slate-100/70 p-4 dark:border-slate-700 dark:bg-slate-900/50 sm:col-span-2">
+				<div class="text-xs font-bold text-muted-foreground">ข้อมูลเก่าที่ยังระบุประเภทการฝึกไม่ได้</div>
+				<div class="mt-1 font-mono tabular-nums text-lg font-bold text-foreground">{data.practiceOverview.unclassifiedAttempts} ครั้ง</div>
+				<p class="mt-1 text-[10px] text-muted-foreground">ไม่นำไปรวมในสถิติ Pitch หรือ Quest เพื่อไม่จัดประเภทคลาดเคลื่อน</p>
+			</div>
+		{/if}
 	</section>
 
 	<!-- 3. ACOUSTIC DATA COLLECTION PROGRESS (20 WORDS MINIMUM) -->
@@ -340,10 +370,10 @@
 				<div class="space-y-1.5">
 					<div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold bg-primary/15 text-primary border border-primary/25">
 						<Lock class="size-3.5" />
-						<span>ต้องการ 20 คำเพื่อปลดล็อกแดชบอร์ด</span>
+						<span>ต้องการผลฝึก Pitch 20 คำเพื่อปลดล็อกแดชบอร์ด</span>
 					</div>
 					<h2 class="text-xl sm:text-2xl font-black text-foreground">
-						ฝึกไปแล้ว {totalPracticedWords} / {MIN_DIAGNOSTIC_WORDS} คำ
+						ฝึก Pitch ไปแล้ว {totalPracticedWords} / {MIN_DIAGNOSTIC_WORDS} คำ
 					</h2>
 					<p class="text-xs sm:text-sm text-muted-foreground max-w-xl leading-relaxed">
 						ลองฝึกออกเสียงให้ครบ 20 คำก่อนนะ ระบบถึงจะเริ่มวิเคราะห์ระดับเสียงวรรณยุกต์ และสรุปวิธีวางลิ้นกับรูปปากที่เหมาะกับคุณให้แบบเจาะลึก
@@ -354,7 +384,7 @@
 						{unlockProgressPercent}%
 					</span>
 					<div class="text-xs font-bold text-muted-foreground mt-0.5">
-						เหลืออีก {wordsRemaining} คำจะปลดล็อกแดชบอร์ด
+						เหลืออีก {wordsRemaining} คำที่จะต้องฝึกด้วย Pitch
 					</div>
 				</div>
 			</div>
@@ -427,7 +457,7 @@
 		<!-- 4. UNLOCKED FULL ACOUSTIC & PHONETIC DIAGNOSTIC SUITE -->
 		<div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
 			<Unlock class="size-3.5" />
-			<span>ปลดล็อกแดชบอร์ดแล้ว (ฝึกสะสม {totalPracticedWords} คำ) · {activeLevelTitle}</span>
+			<span>ปลดล็อกแดชบอร์ดแล้ว (ฝึก Pitch สะสม {totalPracticedWords} คำ) · {activeLevelTitle}</span>
 		</div>
 
 		<!-- 4.1 HERO VISUAL SCORE GAUGE & KEY METRICS -->
@@ -970,6 +1000,10 @@
 						</div>
 						<div class="text-[11px] text-muted-foreground line-clamp-1">
 							{word.thai}
+						</div>
+						<div class="mt-1 flex flex-wrap gap-x-2 text-[9px] font-mono tabular-nums">
+							<span class="text-emerald-700 dark:text-emerald-400">Pitch {word.pitchAttempts} · {word.pitchAvgScore ?? '—'}%</span>
+							<span class="text-blue-700 dark:text-blue-400">Quest {word.questAttempts} · {word.questAvgScore ?? '—'}%</span>
 						</div>
 					</div>
 					<div class="mt-2 pt-1.5 border-t flex items-center justify-between text-[10px] font-bold text-muted-foreground group-hover:text-primary">
