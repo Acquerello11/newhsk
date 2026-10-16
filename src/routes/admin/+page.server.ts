@@ -15,7 +15,10 @@ import {
 	getAuditLogs,
 	getPronunciationPhonemeErrorStats,
 	getDiagnosticAnalytics,
-	getAdvancedLearningAnalytics
+	getAdvancedLearningAnalytics,
+	isUserAdmin,
+	getSystemSetting,
+	setSystemSetting
 } from '$lib/server/db';
 import { ALL_QUEST_STAGES } from '$lib/data/questLevels';
 import { TRACKS, units } from '$lib/data/lessons';
@@ -54,7 +57,9 @@ export const load: PageServerLoad = async (event) => {
 		auditLogs,
 		classPhonemeStats,
 		selectedUserDetail,
-		advancedAnalytics
+		advancedAnalytics,
+		listeningPolicy,
+		pitchSensitivity
 	] = await Promise.all([
 		listAllUsersWithProgress(),
 		listAllCompletions(),
@@ -64,22 +69,33 @@ export const load: PageServerLoad = async (event) => {
 		getAuditLogs(40),
 		getPronunciationPhonemeErrorStats(),
 		selectedUserId ? getUserFullDetail(selectedUserId) : Promise.resolve(null),
-		getAdvancedLearningAnalytics()
+		getAdvancedLearningAnalytics(),
+		getSystemSetting('listening_policy', 'low_pass'),
+		getSystemSetting('pitch_sensitivity', 'standard')
 	]);
 
-	// Calculate track totals
-	const trackTotals = Object.fromEntries(
-		TRACKS.map((t) => [
-			t.id,
-			units.filter((u) => u.track === t.id).reduce((sum, u) => sum + u.lessons.length, 0)
-		])
-	) as Record<string, number>;
+	const learnerUsers = users.filter((u) => !u.isAdmin);
+	const adminUsers = users.filter((u) => u.isAdmin);
+	const adminUserIdSet = new Set(adminUsers.map((a) => a.id));
+
+	// Precompute track totals and lesson key list per track (eliminates O(N*M) nested unit filters)
+	const trackTotals: Record<string, number> = {};
+	const trackLessonsMap: Record<string, string[]> = {};
+	for (const t of TRACKS) {
+		const trackUnits = units.filter((u) => u.track === t.id);
+		trackTotals[t.id] = trackUnits.reduce((sum, u) => sum + u.lessons.length, 0);
+		trackLessonsMap[t.id] = trackUnits.flatMap((u) => u.lessons.map((l) => `${u.id}/${l.id}`));
+	}
 
 	const completionsByUser = new Map<number, Record<string, number>>();
+	const completionsCountByStage: Record<string, number> = {};
 	for (const c of completions) {
 		const cur = completionsByUser.get(c.userId) ?? {};
 		cur[c.lessonKey] = c.stars;
 		completionsByUser.set(c.userId, cur);
+		if (c.stars > 0) {
+			completionsCountByStage[c.lessonKey] = (completionsCountByStage[c.lessonKey] || 0) + 1;
+		}
 	}
 
 	const today = new Date().toISOString().slice(0, 10);
@@ -90,14 +106,11 @@ export const load: PageServerLoad = async (event) => {
 		for (const t of TRACKS) {
 			let done = 0;
 			let starsSum = 0;
-			for (const unit of units.filter((un) => un.track === t.id)) {
-				for (const lesson of unit.lessons) {
-					const key = `${unit.id}/${lesson.id}`;
-					const stars = comp[key] ?? 0;
-					if (stars > 0) {
-						done += 1;
-						starsSum += stars;
-					}
+			for (const key of trackLessonsMap[t.id] || []) {
+				const stars = comp[key] ?? 0;
+				if (stars > 0) {
+					done += 1;
+					starsSum += stars;
 				}
 			}
 			perTrack[t.id] = { done, total: trackTotals[t.id], stars: starsSum };
@@ -124,17 +137,14 @@ export const load: PageServerLoad = async (event) => {
 			avgTimeSpentSec: 0
 		};
 
-		// Also check lesson_completions from users as completions baseline
-		const completedUsersCount = users.filter((u) => {
-			const comp = completionsByUser.get(u.id);
-			return comp && comp[s.id] && comp[s.id] > 0;
-		}).length;
-
+		// Check lesson_completions from users as completions baseline (O(1) lookup)
+		const completedUsersCount = completionsCountByStage[s.id] || 0;
 		const totalPassed = Math.max(tel.totalPassed, completedUsersCount);
 		const totalAttempts = Math.max(tel.totalAttempts, totalPassed);
 		const totalViews = Math.max(tel.totalViews, totalAttempts);
 		const uniqueUsers = Math.max(tel.uniqueUsers, totalPassed);
-		const unopenedCount = Math.max(0, users.length - uniqueUsers);
+		// Unopened count should reflect learners, not inflated by admin accounts
+		const unopenedCount = Math.max(0, learnerUsers.length - uniqueUsers);
 		const passRate = totalAttempts > 0 ? Math.round((totalPassed / totalAttempts) * 100) : 0;
 		const dropRate = totalAttempts > 0 ? Math.round((tel.totalFailed / totalAttempts) * 100) : 0;
 
@@ -186,15 +196,12 @@ export const load: PageServerLoad = async (event) => {
 		} catch {}
 	}
 
-	const learnerUsers = users.filter((u) => !u.isAdmin);
-	const adminUsers = users.filter((u) => u.isAdmin);
-
 	const stats = {
 		totalUsers: users.length,
 		totalLearners: learnerUsers.length,
 		totalAdmins: adminUsers.length,
 		totalXp: learnerUsers.reduce((s, u) => s + u.xp, 0),
-		totalCompletions: completions.filter((c) => c.stars > 0 && !adminUsers.some((a) => a.id === c.userId)).length,
+		totalCompletions: completions.filter((c) => c.stars > 0 && !adminUserIdSet.has(c.userId)).length,
 		activeToday: usersWithDetail.filter((u) => !u.isAdmin && u.activeToday).length,
 		topStreak: learnerUsers.reduce((m, u) => Math.max(m, u.streak), 0),
 		avgGopScore: classPhonemeStats.avgGop,
@@ -214,6 +221,8 @@ export const load: PageServerLoad = async (event) => {
 		auditLogs,
 		classPhonemeStats,
 		advancedAnalytics,
+		listeningPolicy,
+		pitchSensitivity,
 		selectedUserId,
 		selectedUserDetail,
 		selectedUserRemedials,
@@ -276,6 +285,14 @@ export const actions: Actions = {
 			});
 		}
 
+		// 2. Authorization check: ensure user has admin role before issuing session
+		if (!isUserAdmin(row.username)) {
+			return fail(403, {
+				error: `บัญชี "${row.username}" ไม่มีสิทธิ์เข้าถึงระบบผู้ดูแล (Admin) กรุณาใช้บัญชีที่ได้รับอนุญาต`,
+				username
+			});
+		}
+
 		// Clear rate limit tracking on successful authentication
 		handleLoginSuccess(event, username);
 
@@ -298,8 +315,23 @@ export const actions: Actions = {
 
 		const data = await request.formData();
 		const targetUserId = String(data.get('targetUserId') ?? '').trim();
-		if (!targetUserId) {
-			return fail(400, { error: 'Missing target user ID' });
+		const targetIdNum = Number(targetUserId);
+		if (!targetUserId || !targetIdNum || isNaN(targetIdNum)) {
+			return fail(400, { error: 'รหัสผู้ใช้งานไม่ถูกต้อง' });
+		}
+
+		// Prevent impersonating another admin account
+		const { getDb } = await import('$lib/server/db');
+		const client = getDb();
+		if (client) {
+			const uRes = await client.execute({ sql: 'SELECT id, username FROM users WHERE id = ?', args: [targetIdNum] });
+			const targetRow = uRes.rows[0];
+			if (!targetRow) {
+				return fail(404, { error: 'ไม่พบบัญชีผู้เรียนที่ต้องการสวมบทบาท' });
+			}
+			if (isUserAdmin(String(targetRow.username))) {
+				return fail(400, { error: 'ไม่สามารถสวมบทบาทบัญชีผู้ดูแลระบบ (Admin) ได้' });
+			}
 		}
 
 		cookies.set('impersonate_user_id', targetUserId, {
@@ -380,5 +412,37 @@ export const actions: Actions = {
 
 		await resetStageOverride(stageId, admin.username);
 		return { success: true, resetStageId: stageId };
+	},
+
+	saveListeningPolicy: async ({ request, locals }) => {
+		const admin = locals.realAdmin || locals.user;
+		if (!admin?.isAdmin) throw error(403, 'Forbidden');
+		const data = await request.formData();
+		const policy = String(data.get('policy') ?? 'low_pass').trim();
+		await setSystemSetting('listening_policy', policy);
+		await recordAuditLog({
+			actorUsername: admin.username,
+			action: 'update_listening_policy',
+			resourceType: 'system_setting',
+			resourceId: 'listening_policy',
+			details: { policy }
+		});
+		return { success: true, policy };
+	},
+
+	savePitchTuning: async ({ request, locals }) => {
+		const admin = locals.realAdmin || locals.user;
+		if (!admin?.isAdmin) throw error(403, 'Forbidden');
+		const data = await request.formData();
+		const sensitivity = String(data.get('sensitivity') ?? 'standard').trim();
+		await setSystemSetting('pitch_sensitivity', sensitivity);
+		await recordAuditLog({
+			actorUsername: admin.username,
+			action: 'update_pitch_sensitivity',
+			resourceType: 'system_setting',
+			resourceId: 'pitch_sensitivity',
+			details: { sensitivity }
+		});
+		return { success: true, sensitivity };
 	}
 };

@@ -13,8 +13,8 @@ let db: Client | null = null;
 
 export function getDb(): Client | null {
 	if (db) return db;
-	const rawUrl = env.TURSO_DATABASE_URL?.trim();
-	const authToken = env.TURSO_AUTH_TOKEN?.trim();
+	const rawUrl = (env.TURSO_DATABASE_URL || process.env.TURSO_DATABASE_URL)?.trim();
+	const authToken = (env.TURSO_AUTH_TOKEN || process.env.TURSO_AUTH_TOKEN)?.trim();
 	const url = rawUrl || (isServerless ? '' : 'file:data/hsk.db');
 
 	if (!url) {
@@ -177,6 +177,12 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS idx_stage_telemetry_stage ON stage_telemetry(stage_id);
 CREATE INDEX IF NOT EXISTS idx_stage_telemetry_user ON stage_telemetry(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at);
+
+CREATE TABLE IF NOT EXISTS system_settings (
+	key TEXT PRIMARY KEY,
+	value TEXT NOT NULL,
+	updated_at INTEGER NOT NULL
+);
 `;
 
 let initPromise: Promise<void> | null = null;
@@ -418,7 +424,7 @@ export async function completeLesson(userId: number, lessonKey: string, stars: n
 // Admin queries
 
 export function isUserAdmin(username: string): boolean {
-	const adminNames = (env.ADMIN_USERNAMES ?? 'admin')
+	const adminNames = (env.ADMIN_USERNAMES || process.env.ADMIN_USERNAMES || 'admin')
 		.split(',')
 		.map((s) => s.trim().toLowerCase())
 		.filter(Boolean);
@@ -429,7 +435,7 @@ export async function getAdminUserIds(): Promise<string[]> {
 	const client = getDb();
 	if (!client) return [];
 	await init();
-	const adminNames = (env.ADMIN_USERNAMES ?? 'admin')
+	const adminNames = (env.ADMIN_USERNAMES || process.env.ADMIN_USERNAMES || 'admin')
 		.split(',')
 		.map((s) => s.trim().toLowerCase())
 		.filter(Boolean);
@@ -1802,6 +1808,38 @@ export async function getAuditLogs(limit = 50): Promise<Array<{
 	}
 }
 
+export async function getSystemSetting(key: string, defaultValue = ''): Promise<string> {
+	const client = getDb();
+	if (!client) return defaultValue;
+	try {
+		await init();
+		const res = await client.execute({
+			sql: 'SELECT value FROM system_settings WHERE key = ?',
+			args: [key]
+		});
+		return res.rows[0]?.value ? String(res.rows[0].value) : defaultValue;
+	} catch {
+		return defaultValue;
+	}
+}
+
+export async function setSystemSetting(key: string, value: string): Promise<void> {
+	const client = getDb();
+	if (!client) return;
+	try {
+		await init();
+		const now = Date.now();
+		await client.execute({
+			sql: `INSERT INTO system_settings (key, value, updated_at)
+			      VALUES (?, ?, ?)
+			      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+			args: [key, value, now]
+		});
+	} catch (e) {
+		console.warn('Failed to set system setting:', e);
+	}
+}
+
 export async function getUserFullDetail(userId: number) {
 	const client = getDb();
 	if (!client) return null;
@@ -2012,7 +2050,7 @@ export async function getAdvancedLearningAnalytics() {
 
 	const overallDropOffRate = totalAttempts > 0 ? Math.round((totalFailed / totalAttempts) * 100) : 0;
 
-	// 2. Phoneme Substitution Matrix (Real counts & percentages from DB)
+	// 2. Phoneme Substitution Matrix & 3. Tone Confusion Heatmap & 4. Listening Impact (Consolidated Single Pass)
 	const phonemeTargets = ['zh', 'ch', 'sh', 'z', 'c', 's', 'j', 'q', 'x'];
 	const matrixData: Record<string, Record<string, number>> = {};
 	for (const t of phonemeTargets) {
@@ -2023,6 +2061,15 @@ export async function getAdvancedLearningAnalytics() {
 	}
 
 	const observedSubstitutionCounts: Record<string, number> = {};
+	const toneCounts: Record<number, Record<number, number> & { total: number }> = {
+		1: { 1: 0, 2: 0, 3: 0, 4: 0, total: 0 },
+		2: { 1: 0, 2: 0, 3: 0, 4: 0, total: 0 },
+		3: { 1: 0, 2: 0, 3: 0, 4: 0, total: 0 },
+		4: { 1: 0, 2: 0, 3: 0, 4: 0, total: 0 }
+	};
+
+	let withCount = 0, withGopSum = 0, withToneSum = 0, withPerSum = 0, withPassCount = 0;
+	let withoutCount = 0, withoutGopSum = 0, withoutToneSum = 0, withoutPerSum = 0, withoutPassCount = 0;
 
 	try {
 		// 1) From phoneme_evaluations table
@@ -2044,9 +2091,45 @@ export async function getAdvancedLearningAnalytics() {
 			}
 		}
 
-		// 2) From pronunciation_evaluations phoneme_details
-		const proRes = await client.execute('SELECT phoneme_details FROM pronunciation_evaluations');
+		// 2) Get user IDs that listened to examples
+		const leUsers = await client.execute(`
+			SELECT DISTINCT user_id 
+			FROM learning_events 
+			WHERE event_type = 'listened_to_example'
+		`);
+		const listeningUserIds = new Set(leUsers.rows.map((r) => String(r.user_id)));
+
+		// 3) Single consolidated query on pronunciation_evaluations (limit to latest 3,000 for peak speed)
+		const proRes = await client.execute(`
+			SELECT user_id, gop_overall, per_overall, tone_score, phoneme_details 
+			FROM pronunciation_evaluations 
+			ORDER BY created_at DESC 
+			LIMIT 3000
+		`);
+
 		for (const r of proRes.rows) {
+			const uid = String(r.user_id);
+			const gop = Number(r.gop_overall || 0);
+			const tone = Number(r.tone_score || 0);
+			const per = Number(r.per_overall || 0);
+			const isPassed = gop >= 70 ? 1 : 0;
+
+			// LQ5 listening impact
+			if (listeningUserIds.has(uid)) {
+				withCount++;
+				withGopSum += gop;
+				withToneSum += tone;
+				withPerSum += per;
+				withPassCount += isPassed;
+			} else {
+				withoutCount++;
+				withoutGopSum += gop;
+				withoutToneSum += tone;
+				withoutPerSum += per;
+				withoutPassCount += isPassed;
+			}
+
+			// Parse details once for phoneme matrix and tone confusion
 			let details: any[] = [];
 			try { details = JSON.parse(String(r.phoneme_details || '[]')); } catch {}
 			for (const d of details) {
@@ -2057,6 +2140,14 @@ export async function getAdvancedLearningAnalytics() {
 				}
 				if (t && rec && t !== rec) {
 					observedSubstitutionCounts[`${t}->${rec}`] = (observedSubstitutionCounts[`${t}->${rec}`] || 0) + 1;
+				}
+
+				// Tone analysis
+				const targetTone = Number(d.targetTone);
+				const detTone = Number(d.detectedTone);
+				if (targetTone >= 1 && targetTone <= 4 && detTone >= 1 && detTone <= 4) {
+					toneCounts[targetTone][detTone]++;
+					toneCounts[targetTone].total++;
 				}
 			}
 		}
@@ -2073,7 +2164,7 @@ export async function getAdvancedLearningAnalytics() {
 			}
 		}
 	} catch (e) {
-		console.warn('Failed to calculate phoneme substitution matrix from DB:', e);
+		console.warn('Failed to calculate learning analytics from DB:', e);
 	}
 
 	// Minimal pair recommendations prioritized by real DB observations
@@ -2099,32 +2190,6 @@ export async function getAdvancedLearningAnalytics() {
 				: pair.anatomy
 		};
 	}).sort((a, b) => b.observedCount - a.observedCount);
-
-	// 3. Tone Confusion Heatmap (Real 4x4 matrix computed from DB)
-	const toneCounts: Record<number, Record<number, number> & { total: number }> = {
-		1: { 1: 0, 2: 0, 3: 0, 4: 0, total: 0 },
-		2: { 1: 0, 2: 0, 3: 0, 4: 0, total: 0 },
-		3: { 1: 0, 2: 0, 3: 0, 4: 0, total: 0 },
-		4: { 1: 0, 2: 0, 3: 0, 4: 0, total: 0 }
-	};
-
-	try {
-		const toneRes = await client.execute('SELECT phoneme_details FROM pronunciation_evaluations');
-		for (const r of toneRes.rows) {
-			let details: any[] = [];
-			try { details = JSON.parse(String(r.phoneme_details || '[]')); } catch {}
-			for (const d of details) {
-				const t = Number(d.targetTone);
-				const det = Number(d.detectedTone);
-				if (t >= 1 && t <= 4 && det >= 1 && det <= 4) {
-					toneCounts[t][det]++;
-					toneCounts[t].total++;
-				}
-			}
-		}
-	} catch (e) {
-		console.warn('Failed to calculate tone confusion heatmap from DB:', e);
-	}
 
 	const toneLabels: Record<number, string> = {
 		1: 'เสียงที่ 1 (阴平 55)',
@@ -2158,48 +2223,6 @@ export async function getAdvancedLearningAnalytics() {
 	const keyFinding = totalToneEvaluated > 0
 		? `จากการวิเคราะห์ ${totalToneEvaluated} พยางค์ในฐานข้อมูล: เสียงที่ 3 (214) มีอัตราสับสนเป็นเสียงที่ 2 ถึง ${toneMatrix[2].recognizedT2}% และเสียงที่ 4 มีการตัดเสียงเป็นเสียงที่ 3 ถึง ${toneMatrix[3].recognizedT3}%`
 		: 'ยังไม่มีข้อมูลการประเมินเสียงวรรณยุกต์ในระบบ';
-
-	// 4. LQ5 Listening Friction Index (Real Comparison from DB)
-	let withCount = 0, withGopSum = 0, withToneSum = 0, withPerSum = 0, withPassCount = 0;
-	let withoutCount = 0, withoutGopSum = 0, withoutToneSum = 0, withoutPerSum = 0, withoutPassCount = 0;
-
-	try {
-		const leUsers = await client.execute(`
-			SELECT DISTINCT user_id 
-			FROM learning_events 
-			WHERE event_type = 'listened_to_example'
-		`);
-		const listeningUserIds = new Set(leUsers.rows.map((r) => String(r.user_id)));
-
-		const proRes = await client.execute(`
-			SELECT user_id, gop_overall, per_overall, tone_score 
-			FROM pronunciation_evaluations
-		`);
-
-		for (const r of proRes.rows) {
-			const uid = String(r.user_id);
-			const gop = Number(r.gop_overall || 0);
-			const tone = Number(r.tone_score || 0);
-			const per = Number(r.per_overall || 0);
-			const isPassed = gop >= 70 ? 1 : 0;
-
-			if (listeningUserIds.has(uid)) {
-				withCount++;
-				withGopSum += gop;
-				withToneSum += tone;
-				withPerSum += per;
-				withPassCount += isPassed;
-			} else {
-				withoutCount++;
-				withoutGopSum += gop;
-				withoutToneSum += tone;
-				withoutPerSum += per;
-				withoutPassCount += isPassed;
-			}
-		}
-	} catch (e) {
-		console.warn('Failed to calculate LQ5 listening friction index from DB:', e);
-	}
 
 	const withAvgGop = withCount > 0 ? Number((withGopSum / withCount).toFixed(1)) : 0;
 	const withAvgPer = withCount > 0 ? Number((withPerSum / withCount).toFixed(1)) : 0;

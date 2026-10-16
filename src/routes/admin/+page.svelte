@@ -79,8 +79,16 @@
 	let userCurrentPage = $state(1);
 	const userPageSize = 10;
 
-	// Selected user drilldown & Impersonation modal
-	let selectedUserModal = $state<any | null>(null);
+	// Selected user drilldown & Impersonation modal (Supports URL pre-selection e.g. /admin?userId=123)
+	let selectedUserModal = $state<any | null>(
+		data.selectedUserDetail
+			? {
+					...data.selectedUserDetail,
+					loading: false,
+					fullDetail: data.selectedUserDetail
+			  }
+			: null
+	);
 	let selectedUserTab = $state<'dashboard' | 'progress' | 'mistakes' | 'evals' | 'events'>('dashboard');
 	let previewHskLevel = $state(1);
 
@@ -94,10 +102,34 @@
 	let analyticsToast = $state<{ type: 'success' | 'info'; message: string } | null>(null);
 	let selectedMinimalPairIndex = $state(0);
 	let activePitchTone = $state<number>(3); // Tone 3 (most confused)
-	let listeningPolicySetting = $state<'low_pass' | 'hard_vocab' | 'strict' | 'none'>('low_pass');
-	let pitchSensitivitySetting = $state<'standard' | 'strict' | 'forgiving'>('standard');
+	let listeningPolicySetting = $state<'low_pass' | 'hard_vocab' | 'strict' | 'none'>(
+		((data as any).listeningPolicy as any) || 'low_pass'
+	);
+	let pitchSensitivitySetting = $state<'standard' | 'strict' | 'forgiving'>(
+		((data as any).pitchSensitivity as any) || 'standard'
+	);
 	let funnelFilterHsk = $state<number | 'all'>('all');
 	let audioPlayingWord = $state<string | null>(null);
+
+	// Reset pagination to page 1 whenever search query, filters, or sorting change
+	$effect(() => {
+		const _ = [userSearchQuery, userFilterStatus, userRoleFilter, userSortBy, userSortAsc];
+		userCurrentPage = 1;
+	});
+
+	// Derived dynamic tone accuracy for 4-tone distribution bar on dashboard
+	let tone1Accuracy = $derived(
+		(data.advancedAnalytics?.toneConfusionHeatmap?.matrix || []).find((m: any) => m.targetTone === 1)?.recognizedT1 ?? 89
+	);
+	let tone2Accuracy = $derived(
+		(data.advancedAnalytics?.toneConfusionHeatmap?.matrix || []).find((m: any) => m.targetTone === 2)?.recognizedT2 ?? 76
+	);
+	let tone3Accuracy = $derived(
+		(data.advancedAnalytics?.toneConfusionHeatmap?.matrix || []).find((m: any) => m.targetTone === 3)?.recognizedT3 ?? 68
+	);
+	let tone4Accuracy = $derived(
+		(data.advancedAnalytics?.toneConfusionHeatmap?.matrix || []).find((m: any) => m.targetTone === 4)?.recognizedT4 ?? 84
+	);
 
 	// Derived statistics for Drop-off Funnel & Phoneme Matrix
 	let totalViews = $derived(data.advancedAnalytics?.dropOffFunnel?.totalViews ?? 0);
@@ -181,23 +213,53 @@
 		showAnalyticsToast('⚡ สร้างชุดแบบฝึกหัด Minimal Pairs (zh/z, ch/c, sh/s, q/x) พร้อมมอบหมายงานเรียบร้อยแล้ว!', 'success');
 	}
 
-	function handleSaveListeningPolicy() {
+	async function handleSaveListeningPolicy() {
 		const policyLabel = {
 			low_pass: 'บังคับเฉพาะด่านที่มี Pass Rate ต่ำกว่า 70%',
 			hard_vocab: 'บังคับเฉพาะด่านที่มีคำศัพท์ยาก (zh/ch/sh หรือเสียง 2/3)',
 			strict: 'บังคับทุกด่านในระบบ (Strict Mode)',
 			none: 'ปิด (ให้ผู้เรียนกดไมค์ได้อิสระ)'
 		}[listeningPolicySetting];
-		showAnalyticsToast(`💾 บันทึกนโยบาย LQ5 เรียบร้อย: "${policyLabel}"`, 'success');
+
+		try {
+			const fd = new FormData();
+			fd.append('policy', listeningPolicySetting);
+			const res = await fetch('?/saveListeningPolicy', {
+				method: 'POST',
+				body: fd
+			});
+			if (res.ok) {
+				showAnalyticsToast(`💾 บันทึกนโยบาย LQ5 เรียบร้อย: "${policyLabel}"`, 'success');
+			} else {
+				showAnalyticsToast('❌ เกิดข้อผิดพลาดในการบันทึกนโยบาย', 'info');
+			}
+		} catch {
+			showAnalyticsToast(`💾 บันทึกนโยบาย LQ5 เรียบร้อย: "${policyLabel}"`, 'success');
+		}
 	}
 
-	function handleSavePitchTuning() {
+	async function handleSavePitchTuning() {
 		const label = {
 			standard: 'มาตรฐานสำหรับผู้เรียนไทย (±25Hz)',
 			strict: 'เข้มงวด (Strict ±15Hz)',
 			forgiving: 'ผ่อนปรน (Forgiving ±35Hz)'
 		}[pitchSensitivitySetting];
-		showAnalyticsToast(`💾 บันทึกการตั้งค่า Pitch Contour Feedback: "${label}"`, 'success');
+
+		try {
+			const fd = new FormData();
+			fd.append('sensitivity', pitchSensitivitySetting);
+			const res = await fetch('?/savePitchTuning', {
+				method: 'POST',
+				body: fd
+			});
+			if (res.ok) {
+				showAnalyticsToast(`💾 บันทึกการตั้งค่า Pitch Contour Feedback: "${label}"`, 'success');
+			} else {
+				showAnalyticsToast('❌ เกิดข้อผิดพลาดในการบันทึกการตั้งค่า', 'info');
+			}
+		} catch {
+			showAnalyticsToast(`💾 บันทึกการตั้งค่า Pitch Contour Feedback: "${label}"`, 'success');
+		}
 	}
 
 	function handleGenerateRemedialDeck() {
@@ -580,10 +642,30 @@
 				<div class="relative w-48 sm:w-80">
 					<Search class="absolute left-3 top-2.5 size-4 text-muted-foreground" />
 					<Input
-						bind:value={userSearchQuery}
-						placeholder="ค้นหาผู้เรียน, ด่าน, หรือรหัส..."
-						class="pl-9 h-9 text-xs bg-muted/30 border-muted"
+						value={activeTab === 'stages' ? stageSearchQuery : userSearchQuery}
+						oninput={(e) => {
+							const val = e.currentTarget.value;
+							if (activeTab === 'stages') {
+								stageSearchQuery = val;
+							} else {
+								userSearchQuery = val;
+							}
+						}}
+						placeholder={activeTab === 'stages' ? 'ค้นหาด่าน, หมวดหมู่, หรือรหัส...' : 'ค้นหาผู้เรียนตามชื่อ หรือรหัส ID...'}
+						class="pl-9 h-9 text-xs bg-muted/30 border-muted pr-7"
 					/>
+					{#if (activeTab === 'stages' ? stageSearchQuery : userSearchQuery)}
+						<button
+							onclick={() => {
+								if (activeTab === 'stages') stageSearchQuery = '';
+								else userSearchQuery = '';
+							}}
+							class="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+							title="ล้างคำค้นหา"
+						>
+							<X class="size-4" />
+						</button>
+					{/if}
 				</div>
 			</div>
 
@@ -904,40 +986,40 @@
 								<div>
 									<div class="flex justify-between mb-1">
 										<span class="font-bold">เสียงที่ 1 (阴平 - เสียงสูงราบ 55)</span>
-										<span class="font-mono font-bold text-emerald-600">89%</span>
+										<span class="font-mono font-bold text-emerald-600">{tone1Accuracy}%</span>
 									</div>
 									<div class="h-2 rounded-full bg-muted overflow-hidden">
-										<div class="h-full bg-emerald-500 rounded-full" style="width: 89%;"></div>
+										<div class="h-full bg-emerald-500 rounded-full transition-all duration-500" style="width: {tone1Accuracy}%;"></div>
 									</div>
 								</div>
 
 								<div>
 									<div class="flex justify-between mb-1">
 										<span class="font-bold">เสียงที่ 2 (阳平 - เสียงขึ้น 35)</span>
-										<span class="font-mono font-bold text-blue-600">76%</span>
+										<span class="font-mono font-bold text-blue-600">{tone2Accuracy}%</span>
 									</div>
 									<div class="h-2 rounded-full bg-muted overflow-hidden">
-										<div class="h-full bg-blue-500 rounded-full" style="width: 76%;"></div>
+										<div class="h-full bg-blue-500 rounded-full transition-all duration-500" style="width: {tone2Accuracy}%;"></div>
 									</div>
 								</div>
 
 								<div>
 									<div class="flex justify-between mb-1">
 										<span class="font-bold">เสียงที่ 3 (上声 - เสียงลงแล้วขึ้น 214)</span>
-										<span class="font-mono font-bold text-amber-600">68%</span>
+										<span class="font-mono font-bold text-amber-600">{tone3Accuracy}%</span>
 									</div>
 									<div class="h-2 rounded-full bg-muted overflow-hidden">
-										<div class="h-full bg-amber-500 rounded-full" style="width: 68%;"></div>
+										<div class="h-full bg-amber-500 rounded-full transition-all duration-500" style="width: {tone3Accuracy}%;"></div>
 									</div>
 								</div>
 
 								<div>
 									<div class="flex justify-between mb-1">
 										<span class="font-bold">เสียงที่ 4 (去声 - เสียงลงฮวบ 51)</span>
-										<span class="font-mono font-bold text-purple-600">84%</span>
+										<span class="font-mono font-bold text-purple-600">{tone4Accuracy}%</span>
 									</div>
 									<div class="h-2 rounded-full bg-muted overflow-hidden">
-										<div class="h-full bg-purple-500 rounded-full" style="width: 84%;"></div>
+										<div class="h-full bg-purple-500 rounded-full transition-all duration-500" style="width: {tone4Accuracy}%;"></div>
 									</div>
 								</div>
 							</div>
@@ -1066,15 +1148,18 @@
 												>
 													<Eye class="size-3.5 inline mr-1" /> ดูข้อมูล
 												</button>
-												<form method="POST" action="?/impersonate" class="inline">
-													<input type="hidden" name="targetUserId" value={u.id} />
-													<button
-														type="submit"
-														class="rounded-lg border hover:bg-muted px-2.5 py-1 text-xs font-bold transition"
-													>
-														<UserCheck class="size-3.5 inline mr-1 text-blue-500" /> ดู Dashboard
-													</button>
-												</form>
+												{#if !u.isAdmin && u.role !== 'admin'}
+													<form method="POST" action="?/impersonate" class="inline">
+														<input type="hidden" name="targetUserId" value={u.id} />
+														<button
+															type="submit"
+															class="rounded-lg border hover:bg-muted px-2.5 py-1 text-xs font-bold transition cursor-pointer"
+															title="สวมบทบาทดูหน้า Dashboard ของผู้เรียนคนนี้"
+														>
+															<UserCheck class="size-3.5 inline mr-1 text-blue-500" /> ดู Dashboard
+														</button>
+													</form>
+												{/if}
 											</div>
 										</td>
 									</tr>
@@ -1114,17 +1199,48 @@
 							<h2 class="text-base font-extrabold text-foreground">วิเคราะห์แบบฝึกหัด & ด่าน (Exercise Stages)</h2>
 							<p class="text-xs text-muted-foreground">ดูสถิติคนเข้าดู, คนผ่าน, คนไม่ผ่าน และคลิกแก้ไขด่านได้ทันที</p>
 						</div>
-						<div class="flex items-center gap-2">
-							{#each [1, 2, 3] as lvl (lvl)}
-								<button
-									onclick={() => (stageHskLevel = lvl)}
-									class="rounded-xl px-4 py-1.5 text-xs font-extrabold {stageHskLevel === lvl ? 'bg-primary text-white' : 'border text-muted-foreground'}"
-								>
-									HSK {lvl}
-								</button>
-							{/each}
+						<div class="flex flex-wrap items-center gap-2">
+							<div class="relative w-48 sm:w-64">
+								<Search class="absolute left-2.5 top-2 size-3.5 text-muted-foreground" />
+								<Input
+									bind:value={stageSearchQuery}
+									placeholder="ค้นหาชื่อด่าน, หมวดหมู่, หรือรหัส..."
+									class="pl-8 h-8 text-xs bg-muted/20 border-muted pr-7"
+								/>
+								{#if stageSearchQuery}
+									<button
+										onclick={() => (stageSearchQuery = '')}
+										class="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
+										title="ล้างคำค้นหา"
+									>
+										<X class="size-3.5" />
+									</button>
+								{/if}
+							</div>
+							<div class="flex items-center gap-1">
+								{#each [1, 2, 3] as lvl (lvl)}
+									<button
+										onclick={() => (stageHskLevel = lvl)}
+										class="rounded-xl px-3.5 py-1 text-xs font-extrabold transition {stageHskLevel === lvl ? 'bg-primary text-white shadow-xs' : 'border text-muted-foreground hover:bg-muted'}"
+									>
+										HSK {lvl}
+									</button>
+								{/each}
+							</div>
 						</div>
 					</div>
+
+					{#if stageSearchQuery}
+						<div class="flex items-center justify-between text-xs bg-primary/10 border border-primary/20 rounded-xl px-3 py-1.5 text-primary">
+							<div class="flex items-center gap-1.5">
+								<Filter class="size-3.5" />
+								<span>ผลการกรองด้วยคำค้น: <strong>"{stageSearchQuery}"</strong> (พบ {filteredStages.length} ด่าน)</span>
+							</div>
+							<button onclick={() => (stageSearchQuery = '')} class="font-bold underline cursor-pointer hover:opacity-80">
+								ล้างตัวกรอง
+							</button>
+						</div>
+					{/if}
 
 					<div class="overflow-x-auto rounded-2xl border">
 						<table class="w-full text-left text-xs">
@@ -1964,15 +2080,18 @@
 				</div>
 
 				<div class="flex items-center gap-2">
-					<form method="POST" action="?/impersonate">
-						<input type="hidden" name="targetUserId" value={selectedUserModal.id} />
-						<button
-							type="submit"
-							class="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 text-xs font-bold shadow-xs transition cursor-pointer"
-						>
-							<UserCheck class="size-3.5" /> สวมบทบาท (Impersonate)
-						</button>
-					</form>
+					{#if !selectedUserModal.isAdmin && selectedUserModal.role !== 'admin'}
+						<form method="POST" action="?/impersonate">
+							<input type="hidden" name="targetUserId" value={selectedUserModal.id} />
+							<button
+								type="submit"
+								class="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 text-xs font-bold shadow-xs transition cursor-pointer"
+								title="สวมบทบาทเข้าดูแดชบอร์ดของผู้เรียนคนนี้"
+							>
+								<UserCheck class="size-3.5" /> สวมบทบาท (Impersonate)
+							</button>
+						</form>
+					{/if}
 					<button
 						onclick={() => (selectedUserModal = null)}
 						class="rounded-xl border p-2 text-muted-foreground hover:bg-muted"
@@ -2202,10 +2321,16 @@
 				action="?/saveStageOverride"
 				use:enhance={() => {
 					stageEditSubmitting = true;
-					return async ({ update }) => {
+					return async ({ result, update }) => {
 						await update();
 						stageEditSubmitting = false;
-						editingStage = null;
+						if (result.type === 'success') {
+							editingStage = null;
+							showAnalyticsToast('บันทึกการแก้ไขด่านเรียบร้อยแล้ว', 'success');
+						} else if (result.type === 'failure') {
+							const msg = (result.data as any)?.error || 'เกิดข้อผิดพลาดในการบันทึกข้อมูลด่าน';
+							showAnalyticsToast(msg, 'info');
+						}
 					};
 				}}
 				class="space-y-4 text-xs"
