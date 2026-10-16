@@ -19,13 +19,13 @@ const result = generateRemedialVocab(
 
 console.log(`Generated ${result.length} remedial cards:`);
 result.forEach((card, idx) => {
-	console.log(`${idx + 1}. [${card.tag}] ${card.hanzi} (${card.pinyin}) - ${card.thai} | àËµØ¼Å: ${card.reason}`);
+	console.log(`${idx + 1}. [${card.tag}] ${card.hanzi} (${card.pinyin}) - ${card.thai} | ï¿½ËµØ¼ï¿½: ${card.reason}`);
 });
 
 // Verification check
 const allValid = result.every((card) => {
 	const hasZhSh = card.tag.includes('zh') || card.tag.includes('sh') || card.reason.includes('zh') || card.reason.includes('sh');
-	const hasTone3 = card.tag.includes('àÊÕÂ§·Õè 3') || card.reason.includes('àÊÕÂ§·Õè 3');
+	const hasTone3 = card.tag.includes('ï¿½ï¿½ï¿½Â§ï¿½ï¿½ï¿½ 3') || card.reason.includes('ï¿½ï¿½ï¿½Â§ï¿½ï¿½ï¿½ 3');
 	return hasZhSh || hasTone3;
 });
 
