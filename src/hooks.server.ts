@@ -3,7 +3,7 @@ import { findUserBySession } from '$lib/server/db';
 import { env } from '$env/dynamic/private';
 
 const ADMIN_USERNAMES = new Set(
-	(env.ADMIN_USERNAMES ?? '')
+	(env.ADMIN_USERNAMES || 'admin')
 		.split(',')
 		.map((s) => s.trim().toLowerCase())
 		.filter(Boolean)

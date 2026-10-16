@@ -1,0 +1,6 @@
+{
+  "name": "HSK Mandarin Coach - ปากจีน",
+  "description": "Interactive Chinese learning and tone pronunciation trainer with real-time pitch detection, HSK 1-3 quests, conversation scenarios, and AI feedback.",
+  "permissions": [],
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
