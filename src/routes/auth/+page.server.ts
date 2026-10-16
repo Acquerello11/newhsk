@@ -98,6 +98,13 @@ export const actions: Actions = {
 			await mergeLocalProgress(user.id, local);
 			const session = await createSession(user.id);
 			setSessionCookie(cookies, session.token, session.expiresAt);
+			cookies.set('registration_consent', '1', {
+				path: '/',
+				httpOnly: true,
+				sameSite: 'lax',
+				secure: !import.meta.env.DEV,
+				maxAge: 600
+			});
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e);
 			return fail(500, {

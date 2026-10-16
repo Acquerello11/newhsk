@@ -1079,8 +1079,22 @@ export async function getUserConsent(
 		sql: `SELECT granted FROM user_consents WHERE user_id = ? AND consent_type = ? ORDER BY updated_at DESC LIMIT 1`,
 		args: [String(userId), consentType]
 	});
-	if (result.rows.length === 0) return true;
+	if (result.rows.length === 0) return false;
 	return Number(result.rows[0].granted) === 1;
+}
+
+export async function hasUserConsent(
+	userId: string,
+	consentType = 'pdpa_research_telemetry'
+): Promise<boolean> {
+	const client = getDb();
+	if (!client) throw new Error('Database not available while checking user consent.');
+	await init();
+	const result = await client.execute({
+		sql: 'SELECT 1 FROM user_consents WHERE user_id = ? AND consent_type = ? LIMIT 1',
+		args: [String(userId), consentType]
+	});
+	return result.rows.length > 0;
 }
 
 // -------------------------------------------------------------

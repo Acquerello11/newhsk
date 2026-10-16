@@ -2,7 +2,13 @@
 <script lang="ts">
 	import { ShieldCheck, Mic, Lock, CheckCircle2, AlertCircle, Volume2, Sparkles } from '@lucide/svelte';
 
-	let { user = null }: { user?: { id: number; username: string; isAdmin?: boolean; role?: 'admin' | 'user' } | null } = $props();
+	let {
+		user = null,
+		initiallyOpen = false
+	}: {
+		user?: { id: number; username: string; isAdmin?: boolean; role?: 'admin' | 'user'; isImpersonated?: boolean } | null;
+		initiallyOpen?: boolean;
+	} = $props();
 
 	let isOpen = $state(false);
 	let isRequestingMic = $state(false);
@@ -14,25 +20,14 @@
 	let audioConsent = $state(true);
 	let researchConsent = $state(true);
 
-	// Check consent whenever user logs in or page loads
 	$effect(() => {
-		// CRITICAL SEPARATION: If not logged in OR if user is an ADMIN, NEVER show PDPA modal.
-		// Administrators manage the platform and are NOT subjects of student learning research.
-		if (!user || !user.id || user.isAdmin || user.role === 'admin') {
-			isOpen = false;
-			return;
-		}
-
-		// Regular student/learner is logged in: Check user-specific consent record
-		const userStorageKey = `yupakjeen_pdpa_consent_user_${user.id}`;
-		const storedConsent = localStorage.getItem(userStorageKey);
-
-		if (!storedConsent) {
-			// Only show after learner is logged in and hasn't consented yet
-			isOpen = true;
-		} else {
-			isOpen = false;
-		}
+		isOpen = Boolean(
+			initiallyOpen &&
+			user?.id &&
+			!user.isAdmin &&
+			user.role !== 'admin' &&
+			!user.isImpersonated
+		);
 	});
 
 	async function requestMicrophonePermission(): Promise<boolean> {
@@ -67,10 +62,13 @@
 			await requestMicrophonePermission();
 		}
 
-		const userId = user?.id ? String(user.id) : 'usr_uuid_local';
+		if (!user?.id) {
+			micError = 'ไม่พบผู้ใช้ที่เข้าสู่ระบบ กรุณาเข้าสู่ระบบใหม่';
+			return;
+		}
+		const userId = String(user.id);
 		const userStorageKey = `yupakjeen_pdpa_consent_user_${userId}`;
 
-		// Save consent record locally per user
 		const consentData = {
 			userId,
 			termsAccepted,
@@ -81,25 +79,27 @@
 			consentedAt: new Date().toISOString()
 		};
 
-		localStorage.setItem(userStorageKey, JSON.stringify(consentData));
-
-		// Send consent log to backend API
 		try {
-			fetch('/api/v1/consent', {
+			const response = await fetch('/api/v1/consent', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					user_id: userId,
 					terms_accepted: termsAccepted,
 					audio_consent: audioConsent,
 					research_consent: researchConsent,
 					consent_version: 'v1.0'
 				})
-			}).catch(() => {});
-		} catch {}
+			});
+			const result = await response.json();
+			if (!response.ok || result.status !== 'success') {
+				throw new Error(result.message || 'ไม่สามารถบันทึกการยินยอมได้');
+			}
+			localStorage.setItem(userStorageKey, JSON.stringify(consentData));
+			isOpen = false;
+		} catch (err) {
+			micError = err instanceof Error ? err.message : 'ไม่สามารถบันทึกการยินยอมได้ กรุณาลองอีกครั้ง';
+		}
 
-		// Close modal
-		isOpen = false;
 	}
 </script>
 

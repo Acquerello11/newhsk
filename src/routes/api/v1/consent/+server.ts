@@ -2,15 +2,27 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { recordUserConsent, getUserConsent } from '$lib/server/db';
 
-export const GET: RequestHandler = async ({ url, locals }) => {
-	const userId = url.searchParams.get('userId') || (locals.user ? String(locals.user.id) : 'usr_uuid_local');
-	const consentType = url.searchParams.get('consentType') || 'pdpa_research_telemetry';
-	const granted = await getUserConsent(userId, consentType);
-	return json({ userId, consentType, granted });
+export const GET: RequestHandler = async ({ locals }) => {
+	if (!locals.user) {
+		return json({ status: 'unauthorized', message: 'Login is required.' }, { status: 401 });
+	}
+	const userId = String(locals.user.id);
+	const isAdmin = locals.user.isAdmin || locals.user.role === 'admin';
+	const audioConsent = isAdmin ? true : await getUserConsent(userId, 'audio_processing');
+	const researchConsent = isAdmin ? true : await getUserConsent(userId, 'pdpa_research_telemetry');
+	return json({
+		userId,
+		audioConsent,
+		researchConsent,
+		granted: audioConsent && researchConsent
+	});
 };
 
-export const POST: RequestHandler = async ({ request, getClientAddress, locals }) => {
+export const POST: RequestHandler = async ({ request, getClientAddress, locals, cookies }) => {
 	try {
+		if (!locals.user) {
+			return json({ status: 'unauthorized', message: 'Login is required.' }, { status: 401 });
+		}
 		// Admin accounts are system operators, exempt from learner research PDPA consent
 		if (locals.user?.isAdmin || locals.user?.role === 'admin') {
 			return json({
@@ -22,9 +34,9 @@ export const POST: RequestHandler = async ({ request, getClientAddress, locals }
 		}
 
 		const body = await request.json();
-		const userId = body.user_id || (locals.user ? String(locals.user.id) : 'usr_uuid_local');
-		const consentType = body.consent_type || 'pdpa_research_telemetry';
-		const granted = body.audio_consent !== false && body.terms_accepted !== false;
+		const userId = String(locals.user.id);
+		const audioConsent = body.audio_consent === true && body.terms_accepted !== false;
+		const researchConsent = body.research_consent === true;
 		const userAgent = request.headers.get('user-agent') || undefined;
 
 		let clientIp: string | undefined = undefined;
@@ -36,15 +48,25 @@ export const POST: RequestHandler = async ({ request, getClientAddress, locals }
 
 		await recordUserConsent({
 			userId,
-			consentType,
-			granted,
+			consentType: 'audio_processing',
+			granted: audioConsent,
 			ipAddress: clientIp,
 			userAgent
 		});
+		await recordUserConsent({
+			userId,
+			consentType: 'pdpa_research_telemetry',
+			granted: researchConsent,
+			ipAddress: clientIp,
+			userAgent
+		});
+		cookies.delete('registration_consent', { path: '/' });
 
 		return json({
 			status: 'success',
 			userId,
+			audioConsent,
+			researchConsent,
 			consentedAt: new Date().toISOString(),
 			message: 'PDPA consent and microphone agreement recorded successfully.'
 		});

@@ -33,7 +33,6 @@
 
 {@render children()}
 <InAppBrowserGuard />
-{#if data.user && !data.user.isAdmin && data.user.role !== 'admin'}
-	<PdpaConsentModal user={data.user} />
+{#if data.showRegistrationConsent && data.user && !data.user.isImpersonated}
+	<PdpaConsentModal user={data.user} initiallyOpen={data.showRegistrationConsent} />
 {/if}
-
