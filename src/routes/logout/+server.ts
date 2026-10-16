@@ -7,6 +7,7 @@ export const POST: RequestHandler = async ({ cookies, url }) => {
 	if (token) await deleteSession(token);
 	cookies.delete('session', { path: '/' });
 	cookies.delete('impersonate_user_id', { path: '/' });
+	cookies.delete('registration_consent', { path: '/' });
 	const redirectTo = url.searchParams.get('redirectTo') || '/';
 	throw redirect(303, redirectTo);
 };
@@ -16,6 +17,7 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 	if (token) await deleteSession(token);
 	cookies.delete('session', { path: '/' });
 	cookies.delete('impersonate_user_id', { path: '/' });
+	cookies.delete('registration_consent', { path: '/' });
 	const redirectTo = url.searchParams.get('redirectTo') || '/';
 	throw redirect(303, redirectTo);
 };
