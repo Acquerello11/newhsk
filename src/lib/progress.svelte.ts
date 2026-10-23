@@ -108,7 +108,9 @@ export const progress = {
 	},
 
 	loseHeart() {
-		// Kept as a compatibility method; practice is no longer limited by hearts.
+		state.hearts = Math.max(0, state.hearts - 1);
+		if (state.loggedIn) pushServer({ action: 'loseHeart' });
+		else saveLocal(snapshot());
 	},
 
 	refillHearts() {

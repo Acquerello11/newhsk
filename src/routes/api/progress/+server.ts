@@ -28,8 +28,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	switch (body.action) {
 		case 'addXp':
-			// Security: Cap XP to max 100 per action to prevent arbitrary leaderboard inflation
-			await addXp(uid, Math.min(100, Math.max(0, Math.floor(body.amount || 0))));
+			// Security: Cap XP gained per action (max 50 XP per request) to prevent score inflation
+			await addXp(uid, Math.min(50, Math.max(0, Math.floor(body.amount || 0))));
 			break;
 		case 'loseHeart':
 			await loseHeart(uid);
@@ -38,8 +38,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			await refillHearts(uid, MAX_HEARTS);
 			break;
 		case 'completeLesson':
-			if (typeof body.key === 'string' && body.key.trim().length > 0) {
-				await completeLesson(uid, body.key.slice(0, 100), Math.max(0, Math.min(3, Math.floor(body.stars || 0))));
+			// Security: Validate key format and clamp stars between 1 and 3
+			if (typeof body.key === 'string' && /^[a-zA-Z0-9_\-\/]{2,60}$/.test(body.key)) {
+				await completeLesson(uid, body.key, Math.max(1, Math.min(3, Math.floor(body.stars))));
 			}
 			break;
 		default:

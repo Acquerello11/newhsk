@@ -4,8 +4,21 @@ import {
 	listAllCompletions,
 	findUserByUsername,
 	verifyPassword,
+<<<<<<< Updated upstream
+	createSession
+=======
 	createSession,
 	getResearchExportStats,
+<<<<<<< Updated upstream
+	getCohortDiagnosticAnalytics
+>>>>>>> Stashed changes
+} from '$lib/server/db';
+import {
+	getCurriculumDifficultyAnalytics,
+	listAllLearnersWithInsights,
+	seedLearningAnalyticsDemoData
+} from '$lib/server/learning-analytics';
+=======
 	getUserFullDetail,
 	getStageTelemetryStats,
 	getStageOverrides,
@@ -23,6 +36,7 @@ import {
 	setSystemSetting
 } from '$lib/server/db';
 import { ALL_QUEST_STAGES, parseQuestChallenges } from '$lib/data/questLevels';
+>>>>>>> Stashed changes
 import { TRACKS, units } from '$lib/data/lessons';
 import { generateRemedialVocab } from '$lib/analytics/remedialEngine';
 import { HSK1_VOCAB_PRESETS } from '$lib/vocabLoader';
@@ -46,14 +60,31 @@ export const load: PageServerLoad = async (event) => {
 		throw error(403, `Account "${currentUser.username}" is not an admin.`);
 	}
 
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+	const [users, completions] = await Promise.all([
+		listAllUsersWithProgress(),
+		listAllCompletions()
+=======
+	let initialUsers = await listAllUsersWithProgress();
+	if (initialUsers.length <= 1) {
+		await seedLearningAnalyticsDemoData();
+	}
+=======
 	const selectedUserId = url.searchParams.get('userId')
 		? Number(url.searchParams.get('userId'))
 		: null;
+>>>>>>> Stashed changes
 
 	const [
 		users,
 		completions,
 		researchStats,
+<<<<<<< Updated upstream
+		cohortAnalytics,
+		curriculumDifficulty,
+		detailedLearners
+=======
 		stageTelemetry,
 		stageOverrides,
 		auditLogs,
@@ -65,10 +96,17 @@ export const load: PageServerLoad = async (event) => {
 		pitchAnalytics,
 		listeningPolicy,
 		pitchSensitivity
+>>>>>>> Stashed changes
 	] = await Promise.all([
 		listAllUsersWithProgress(),
 		listAllCompletions(),
 		getResearchExportStats(),
+<<<<<<< Updated upstream
+		getCohortDiagnosticAnalytics(),
+		getCurriculumDifficultyAnalytics(),
+		listAllLearnersWithInsights()
+>>>>>>> Stashed changes
+=======
 		getStageTelemetryStats(),
 		getStageOverrides(),
 		getAuditLogs(40),
@@ -80,6 +118,7 @@ export const load: PageServerLoad = async (event) => {
 		getAdvancedLearningAnalytics('word'),
 		getSystemSetting('listening_policy', 'low_pass'),
 		getSystemSetting('pitch_sensitivity', 'standard')
+>>>>>>> Stashed changes
 	]);
 
 	const learnerUsers = users.filter((u) => !u.isAdmin);
@@ -230,7 +269,13 @@ export const load: PageServerLoad = async (event) => {
 		isImpersonating: !!locals.user?.isImpersonated,
 		impersonatedUserId: locals.user?.isImpersonated ? locals.user.id : null,
 		stats,
+<<<<<<< Updated upstream
+=======
 		researchStats,
+		cohortAnalytics,
+		curriculumDifficulty,
+		detailedLearners,
+>>>>>>> Stashed changes
 		users: usersWithDetail,
 		stages: enrichedStages,
 		auditLogs,
@@ -326,6 +371,14 @@ export const actions: Actions = {
 		});
 		throw redirect(303, '/admin');
 	},
+<<<<<<< Updated upstream
+	seedDemoCohort: async ({ locals }) => {
+		if (!locals.user?.isAdmin) {
+			throw error(403, 'Admin only');
+		}
+		const res = await seedLearningAnalyticsDemoData();
+		return res;
+=======
 
 	impersonate: async ({ request, cookies, locals }) => {
 		const admin = locals.realAdmin || locals.user;
@@ -411,7 +464,7 @@ export const actions: Actions = {
 		const challenges = parseQuestChallenges(challengeJson);
 		if (!challenges) {
 			return fail(400, {
-				error: 'รูปแบบเนื้อหาโจทย์ไม่ถูกต้อง: ตรวจ JSON, ชนิดโจทย์, คำศัพท์, ตัวเลือก และคำตอบที่ถูกต้อง'
+				error: 'เนื้อหาโจทย์ไม่ถูกต้อง: ตรวจชนิดโจทย์ คำศัพท์ ตัวเลือก และคำตอบที่ถูกต้องอีกครั้ง'
 			});
 		}
 
@@ -501,5 +554,7 @@ export const actions: Actions = {
 			details: { sensitivity }
 		});
 		return { success: true, sensitivity };
+>>>>>>> Stashed changes
 	}
 };
+

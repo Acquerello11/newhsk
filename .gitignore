@@ -22,7 +22,6 @@ Thumbs.db
 /data
 
 # Vite
-.vite/
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
@@ -30,4 +29,3 @@ vite.config.ts.timestamp-*
 .env*
 __pycache__/
 *.pyc
-newhsk/

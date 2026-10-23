@@ -11,7 +11,7 @@
 		type PitchPoint 
 	} from '$lib/pitch';
 	import { predictToneNeuralNetwork } from '$lib/onnxTonePredictor';
-	import { Mic, CheckCircle2, AlertCircle, Sparkles, X, Volume2, ArrowRight } from '@lucide/svelte';
+	import { Heart, Mic, CheckCircle2, AlertCircle, Sparkles, X, Volume2, ArrowRight } from '@lucide/svelte';
 	import { 
 		speak, 
 		createRecognizer, 
@@ -20,6 +20,7 @@
 		verifySentenceReading,
 		type SentenceVerificationResult
 	} from '$lib/speech';
+	import { sendPronunciationTelemetry } from '$lib/telemetry/client';
 
 	let { data } = $props();
 	const stageData: QuestStage | undefined = data.stage;
@@ -47,15 +48,13 @@
 	let speechCandidates: string[] = [];
 	let recognizedWord = $state<string>('');
 
-	let stageStartTime = Date.now();
+	const stageStartTime = Date.now();
 	let listenCount = 0;
 	let hintsUsed = 0;
-	let retriesCount = 0;
 	let stageCompleted = false;
 
 	function sendStageTelemetry(eventType: 'view' | 'attempt' | 'pass' | 'fail' | 'hint' | 'listen', score = 0) {
 		if (!stageId || typeof window === 'undefined') return;
-		const timeSpentMs = Date.now() - stageStartTime;
 		fetch('/api/v1/telemetry/stage-event', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
@@ -63,8 +62,8 @@
 				stageId,
 				eventType,
 				score,
-				timeSpentMs,
-				retriesCount,
+				timeSpentMs: Date.now() - stageStartTime,
+				retriesCount: stageMistakes,
 				listenCount,
 				hintsUsed
 			})
@@ -75,16 +74,18 @@
 		if (!stageData) {
 			goto('/');
 		} else {
-			sendStageTelemetry('view');
+<<<<<<< Updated upstream
 			playAudioIfListenSpeak();
+=======
+			sendStageTelemetry('view');
+			playAudioIfListenSpeak(stageData.challenges[0]);
+>>>>>>> Stashed changes
 		}
 	});
 
 	onDestroy(() => {
 		stopRecording();
-		if (!stageCompleted) {
-			sendStageTelemetry('fail');
-		}
+		if (!stageCompleted) sendStageTelemetry('fail');
 	});
 
 	const currentChallenge = $derived(stageData?.challenges[currentIndex]);
@@ -92,9 +93,19 @@
 
 	function toggleHint() {
 		showHint = !showHint;
+		if (showHint) {
+			hintsUsed++;
+			sendStageTelemetry('hint');
+		}
 	}
 
 	function playAudio() {
+<<<<<<< Updated upstream
+=======
+		clearAudioTimer();
+		listenCount++;
+		sendStageTelemetry('listen');
+>>>>>>> Stashed changes
 		if (currentChallenge) {
 			if (currentChallenge.type === 'sentence_build' && currentChallenge.sentenceHanzi) {
 				speak(currentChallenge.sentenceHanzi);
@@ -134,7 +145,10 @@
 			} else {
 				feedbackType = 'error';
 				feedbackMessage = 'ผิด! คำแปลที่ถูกคือ: ' + currentChallenge.word.thai;
-				setTimeout(nextChallenge, 2500);
+				progress.loseHeart();
+				if (!checkGameOver()) {
+					setTimeout(nextChallenge, 2500);
+				}
 			}
 		}
 	}
@@ -145,6 +159,16 @@
 	}
 
 	async function startRecording() {
+<<<<<<< Updated upstream
+=======
+		clearAudioTimer();
+		if (typeof window !== 'undefined' && window.speechSynthesis) {
+			try {
+				window.speechSynthesis.cancel();
+			} catch {}
+		}
+		sendStageTelemetry('attempt');
+>>>>>>> Stashed changes
 		feedbackType = 'none';
 		feedbackMessage = '';
 		sentenceCheckResult = null;
@@ -291,9 +315,12 @@
 				} else {
 					feedbackType = 'error';
 					feedbackMessage = sentenceRes.feedback;
-					setTimeout(() => {
-						feedbackType = 'none';
-					}, 2500);
+					progress.loseHeart();
+					if (!checkGameOver()) {
+						setTimeout(() => {
+							feedbackType = 'none';
+						}, 2500);
+					}
 				}
 				return;
 			}
@@ -339,65 +366,59 @@
 				} else {
 					feedbackMessage = 'ยังไม่พบเสียงคำศัพท์ กรุณาออกเสียงให้ชัดเจน';
 				}
-				setTimeout(() => {
-					feedbackType = 'none';
-				}, 2200);
+				progress.loseHeart();
+				if (!checkGameOver()) {
+					setTimeout(() => {
+						feedbackType = 'none';
+					}, 2200);
+				}
 				return;
 			}
 
-			// Dispatch research telemetry to /api/v1/telemetry/score-ingest
-			const finalScore = isWordCorrect ? Math.max(res.overallScore, 75) : Math.min(res.overallScore, 50);
-			const telemetryPayload = {
+			// Ingest pronunciation telemetry into research LRS & Neon DB
+			sendPronunciationTelemetry({
 				eventType: 'pronunciation_evaluation',
 				timestamp: new Date().toISOString(),
-				practiceMode: 'stage',
-				stageId,
+				mode: 'quest',
 				word: {
 					id: currentChallenge.word.hanzi,
 					hanzi: currentChallenge.word.hanzi,
 					pinyin: currentChallenge.word.pinyin,
-					meaning: currentChallenge.word.thai || currentChallenge.word.english || '',
-					expectedTone: currentChallenge.word.tone
+					meaning: currentChallenge.word.thai || '',
+					expectedTone: currentChallenge.word.tone || 1,
+					tonePattern: String(currentChallenge.word.tone || 1)
 				},
 				behavior: {
-					listenedToExample: currentChallenge.type === 'listen_speak' || showHint,
+					listenedToExample: currentChallenge.type === 'listen_speak',
 					listenCount: currentChallenge.type === 'listen_speak' ? 1 : 0,
 					listenTimestamps: []
 				},
 				assessment: {
 					isPassed: isWordCorrect,
-					overallScore: finalScore,
+					overallScore: res.overallScore,
 					rawScore: res.overallScore,
-					isToneMatch: res.overallScore >= 55,
+					isToneMatch: res.isAllMatch,
 					isWordMatch: isWordCorrect,
-					recognizedWord: finalHeard || undefined,
-					speechCandidates: [...candidatePool],
-					syllableResults: (res.syllableResults || []).map((s) => ({
-						syllableIndex: s.syllableIndex,
+					recognizedWord: finalHeard,
+					speechCandidates: candidatePool,
+					syllableResults: res.syllableResults.map((s, idx) => ({
+						syllableIndex: idx,
 						hanzi: s.hanzi,
-						pinyin: s.pinyin,
+						pinyin: s.pinyin || '',
+						score: s.score,
+						isMatch: s.isMatch,
 						targetTone: s.targetTone,
 						detectedTone: s.detectedTone,
-						isMatch: s.isMatch,
-						score: s.score,
-						feedback: s.feedback,
-						isAIModel: s.isAIModel
+						feedback: s.feedback || ''
 					})),
 					acoustics: {
-						avgF0: res.avgF0 || 0,
-						totalDurationMs: res.totalDurationMs || 0
+						avgF0: res.avgF0 ?? 0,
+						totalDurationMs: res.totalDurationMs ?? 1500
 					},
-					overallFeedback: isWordCorrect ? 'ออกเสียงถูกต้อง' : `ยังไม่ตรง (ได้ยิน: "${finalHeard || '-'}")`
+					overallFeedback: res.overallFeedback
 				}
-			};
-
-			fetch('/api/v1/telemetry/score-ingest', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(telemetryPayload)
 			}).catch(() => {});
 
-			// User MUST have pronounced the target word correctly to pass
 			if (isWordCorrect) {
 				const isToneGood = res.overallScore >= 55;
 				feedbackType = 'success';
@@ -406,25 +427,14 @@
 					: 'ดีมาก! ออกเสียงถูก (ปรับวรรณยุกต์อีกนิดจะเพอร์เฟกต์)';
 				setTimeout(nextChallenge, 1500);
 			} else {
-				fetch('/api/mistakes', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						hanzi: currentChallenge.word.hanzi,
-						pinyin: currentChallenge.word.pinyin,
-						meaning: currentChallenge.word.thai || currentChallenge.word.english || '',
-						expectedTone: currentChallenge.word.tone,
-						heardText: finalHeard || '',
-						score: finalScore,
-						feedback: `ยังไม่ตรง (ได้ยิน: "${finalHeard || '-'}")`
-					})
-				}).catch(() => {});
-
 				feedbackType = 'error';
 				feedbackMessage = `ยังไม่ตรง (ได้ยิน: "${finalHeard || '-'}") ลองใหม่`;
-				setTimeout(() => {
-					feedbackType = 'none';
-				}, 2000);
+				progress.loseHeart();
+				if (!checkGameOver()) {
+					setTimeout(() => {
+						feedbackType = 'none';
+					}, 2000);
+				}
 			}
 		} else {
 			feedbackType = 'error';
@@ -433,6 +443,15 @@
 				feedbackType = 'none';
 			}, 1500);
 		}
+	}
+
+	function checkGameOver() {
+		if (progress.hearts === 0) {
+			alert('หัวใจหมดแล้ว! กลับไปพักผ่อนแล้วมาท้าทายใหม่นะ');
+			goto('/');
+			return true;
+		}
+		return false;
 	}
 
 	function nextFlashcard() {
@@ -450,9 +469,9 @@
 	}
 
 	function triggerVictory() {
+		phase = 'victory';
 		stageCompleted = true;
 		sendStageTelemetry('pass', 100);
-		phase = 'victory';
 		progress.addXp(25);
 		if (stageId) progress.completeLesson(stageId, 3);
 	}
@@ -507,6 +526,10 @@
 			</a>
 			<div class="h-4 flex-1 overflow-hidden rounded-full bg-muted">
 				<div class="h-full rounded-full bg-green-500 transition-all duration-500" style="width: {progressPercent}%"></div>
+			</div>
+			<div class="flex items-center gap-1.5 font-bold text-red-500">
+				<Heart class="size-6 fill-red-500" />
+				<span class="text-lg">{progress.hearts}</span>
 			</div>
 		</div>
 

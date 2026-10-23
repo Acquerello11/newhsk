@@ -1,5 +1,8 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+<<<<<<< Updated upstream
+import { recordUserConsent } from '$lib/server/db';
+=======
 import { recordUserConsent, getUserConsent } from '$lib/server/db';
 
 export const GET: RequestHandler = async ({ locals }) => {
@@ -17,6 +20,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 		granted: audioConsent && researchConsent
 	});
 };
+>>>>>>> Stashed changes
 
 export const POST: RequestHandler = async ({ request, getClientAddress, locals, cookies }) => {
 	try {

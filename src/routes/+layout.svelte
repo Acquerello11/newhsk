@@ -16,7 +16,6 @@
 	<title>語 ปากจีน — ฝึกพูดภาษาจีน HSK</title>
 	<link rel="icon" href={favicon} />
 </svelte:head>
-
 {#if data.user?.isImpersonated}
 	<div class="sticky top-0 z-[100] flex flex-wrap items-center justify-between gap-2 bg-amber-500 px-4 py-2 text-xs font-bold text-amber-950 shadow-md">
 		<div class="flex items-center gap-2">
@@ -33,6 +32,12 @@
 
 {@render children()}
 <InAppBrowserGuard />
-{#if data.showRegistrationConsent && data.user && !data.user.isImpersonated}
-	<PdpaConsentModal user={data.user} initiallyOpen={data.showRegistrationConsent} />
+<<<<<<< Updated upstream
+<PdpaConsentModal user={data.user} />
+=======
+{#if data.showConsent && data.user && !data.user.isImpersonated}
+	<PdpaConsentModal user={data.user} initiallyOpen={data.showConsent} />
 {/if}
+<AssessmentPromptModal user={data.user} />
+
+>>>>>>> Stashed changes

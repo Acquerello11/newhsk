@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { browser } from '$app/environment';
-	import { page } from '$app/stores';
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import PitchVisualizer from '$lib/components/PitchVisualizer.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -114,19 +113,7 @@
 
 	onMount(() => {
 		loadStats();
-		const queryWord = $page.url.searchParams.get('word');
-		if (queryWord) {
-			const all = [...HSK1_VOCAB_PRESETS, ...HSK2_VOCAB_PRESETS, ...HSK3_VOCAB_PRESETS];
-			const found = all.find((p) => p.hanzi === queryWord || p.id === queryWord || p.pinyin === queryWord);
-			if (found) {
-				selectedPreset = found;
-				const lvl = HSK1_VOCAB_PRESETS.includes(found) ? 1 : (HSK2_VOCAB_PRESETS.includes(found) ? 2 : 3);
-				currentLevel = lvl;
-				vocabList = lvl === 2 ? HSK2_VOCAB_PRESETS : (lvl === 3 ? HSK3_VOCAB_PRESETS : HSK1_VOCAB_PRESETS);
-			} else if (HSK1_VOCAB_PRESETS.length > 0) {
-				selectedPreset = HSK1_VOCAB_PRESETS[0];
-			}
-		} else if (HSK1_VOCAB_PRESETS.length > 0) {
+		if (HSK1_VOCAB_PRESETS.length > 0) {
 			selectedPreset = HSK1_VOCAB_PRESETS[0];
 		}
 		// Warm up the 1D-CNN + Bi-LSTM ONNX AI model in the background
@@ -525,13 +512,20 @@
 				[selectedPreset.id]: updatedStat
 			});
 
+			const hskLevelNum = selectedPreset.id.startsWith('hsk2')
+				? 2
+				: selectedPreset.id.startsWith('hsk3')
+					? 3
+					: 1;
+
 			// 1. Send comprehensive JSON telemetry payload to /api/v1/telemetry/score-ingest for xAPI translation
 			const telemetryPayload = {
 				eventType: 'pronunciation_evaluation',
 				timestamp: new Date().toISOString(),
-				practiceMode: 'word',
+				hsk_level: hskLevelNum,
+				mode: 'free_pitch',
 				word: {
-					id: selectedPreset.id,
+					id: selectedPreset.hanzi,
 					hanzi: selectedPreset.hanzi,
 					pinyin: selectedPreset.pinyin,
 					meaning: selectedPreset.thai || selectedPreset.english,

@@ -6,7 +6,8 @@ import {
 	verifyPassword,
 	getProgress,
 	completeLesson,
-	addXp
+	addXp,
+	isUserAdmin
 } from '$lib/server/db';
 import { checkLoginProtection, handleLoginFailure, handleLoginSuccess } from '$lib/server/rateLimit';
 import type { Actions, PageServerLoad } from './$types';
@@ -56,20 +57,59 @@ async function mergeLocalProgress(userId: number, raw: string | null) {
 	} catch {
 		return;
 	}
-	if (parsed.completed) {
-		for (const [key, stars] of Object.entries(parsed.completed)) {
-			await completeLesson(userId, key, Number(stars) || 0);
+
+	// Security: Validate lesson completions format, clamp stars to 1-3, and limit to max 15 guest lessons
+	if (parsed.completed && typeof parsed.completed === 'object') {
+		const entries = Object.entries(parsed.completed).slice(0, 15);
+		for (const [key, stars] of entries) {
+			const clampedStars = Math.max(1, Math.min(3, Math.floor(Number(stars) || 0)));
+			if (typeof key === 'string' && /^[a-zA-Z0-9_\-\/]{2,60}$/.test(key)) {
+				await completeLesson(userId, key, clampedStars);
+			}
 		}
 	}
+
+	// Security: Cap client-submitted guest XP to a safe maximum (200 XP) to prevent arbitrary score inflation
 	if (typeof parsed.xp === 'number' && parsed.xp > 0) {
+		const safeXp = Math.min(200, Math.floor(parsed.xp));
 		const cur = await getProgress(userId);
-		if (parsed.xp > cur.xp) await addXp(userId, parsed.xp - cur.xp);
+		if (safeXp > cur.xp) {
+			await addXp(userId, safeXp - cur.xp);
+		}
 	}
 }
 
+// Security: In-memory sliding rate limiter to prevent brute-force attacks and registration spam
+const attemptStore = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(key: string, maxAttempts = 5, windowMs = 60_000): { allowed: boolean; waitSec: number } {
+	const now = Date.now();
+	const entry = attemptStore.get(key);
+	if (!entry || now > entry.resetAt) {
+		attemptStore.set(key, { count: 1, resetAt: now + windowMs });
+		return { allowed: true, waitSec: 0 };
+	}
+	if (entry.count >= maxAttempts) {
+		const waitSec = Math.ceil((entry.resetAt - now) / 1000);
+		return { allowed: false, waitSec };
+	}
+	entry.count++;
+	return { allowed: true, waitSec: 0 };
+}
+
 export const actions: Actions = {
+<<<<<<< Updated upstream
+	register: async ({ request, cookies, getClientAddress }) => {
+		const clientIp = getClientAddress ? getClientAddress() : 'unknown';
+		const { allowed, waitSec } = checkRateLimit(`reg_${clientIp}`, 5, 120_000);
+		if (!allowed) {
+			return fail(429, { error: `คุณสร้างบัญชีถี่เกินไป กรุณารออีก ${waitSec} วินาทีแล้วลองใหม่` });
+		}
+
+=======
 	register: async (event) => {
 		const { request, cookies } = event;
+>>>>>>> Stashed changes
 		const data = await request.formData();
 		const { username, password } = readForm(data);
 		const local = String(data.get('local') ?? '') || null;
@@ -89,7 +129,9 @@ export const actions: Actions = {
 		if (password.length < 6) return fail(400, { error: 'Password must be at least 6 characters', username });
 
 		try {
-			if (await findUserByUsername(username)) {
+			// Admin usernames must be seeded with scripts/database/create_admin.mjs.
+			// Never let a public sign-up claim a name that ADMIN_USERNAMES grants admin to.
+			if (isUserAdmin(username) || (await findUserByUsername(username))) {
 				return fail(400, { error: 'Username already taken', username });
 			}
 
@@ -117,12 +159,25 @@ export const actions: Actions = {
 		throw redirect(303, '/');
 	},
 
+<<<<<<< Updated upstream
+	login: async ({ request, cookies, getClientAddress }) => {
+=======
 	login: async (event) => {
 		const { request, cookies } = event;
+>>>>>>> Stashed changes
 		const data = await request.formData();
 		const { username, password } = readForm(data);
 		const local = String(data.get('local') ?? '') || null;
 
+<<<<<<< Updated upstream
+		const clientIp = getClientAddress ? getClientAddress() : 'unknown';
+		const rateKey = `login_${clientIp}_${username.toLowerCase()}`;
+		const { allowed, waitSec } = checkRateLimit(rateKey, 6, 60_000);
+		if (!allowed) {
+			return fail(429, {
+				error: `เข้าสู่ระบบผิดพลาดหลายครั้ง กรุณารออีก ${waitSec} วินาทีเพื่อความปลอดภัย`,
+				username
+=======
 		// 1. Check rate limit before performing DB queries or bcrypt check
 		const protection = checkLoginProtection(event, username);
 		if (protection.isBlocked) {
@@ -131,6 +186,7 @@ export const actions: Actions = {
 				username,
 				isBlocked: true,
 				remainingSeconds: protection.remainingSeconds
+>>>>>>> Stashed changes
 			});
 		}
 
@@ -152,8 +208,13 @@ export const actions: Actions = {
 				});
 			}
 
+<<<<<<< Updated upstream
+			// Clear rate limit on successful authentication
+			attemptStore.delete(rateKey);
+=======
 			// Clear rate limit tracking on success
 			handleLoginSuccess(event, username);
+>>>>>>> Stashed changes
 
 			await mergeLocalProgress(row.id, local);
 			const session = await createSession(row.id);

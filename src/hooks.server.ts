@@ -2,12 +2,23 @@ import type { Handle } from '@sveltejs/kit';
 import { findUserBySession } from '$lib/server/db';
 import { env } from '$env/dynamic/private';
 
+// Security: In production, require explicit ADMIN_USERNAMES from environment variables.
+// In local dev, allow the dedicated 'admin' account. Never allow arbitrary user accounts by default.
+const rawAdminConfig = env.ADMIN_USERNAMES ?? (import.meta.env.DEV ? 'admin' : '');
 const ADMIN_USERNAMES = new Set(
-	(env.ADMIN_USERNAMES || 'admin')
+	rawAdminConfig
 		.split(',')
 		.map((s) => s.trim().toLowerCase())
 		.filter(Boolean)
 );
+
+function applySecurityHeaders(response: Response): void {
+	response.headers.set('X-Frame-Options', 'SAMEORIGIN');
+	response.headers.set('X-Content-Type-Options', 'nosniff');
+	response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+	response.headers.set('Permissions-Policy', 'microphone=(self), camera=(), geolocation=()');
+	response.headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+}
 
 export const handle: Handle = async ({ event, resolve }) => {
 	try {
@@ -15,14 +26,14 @@ export const handle: Handle = async ({ event, resolve }) => {
 		const user = token ? await findUserBySession(token) : null;
 		const isAdmin = user ? ADMIN_USERNAMES.has(user.username.toLowerCase()) : false;
 
-		const impersonateId = event.cookies.get('impersonate_user_id');
-		if (isAdmin && impersonateId && user) {
+		const impersonateId = Number(event.cookies.get('impersonate_user_id'));
+		if (isAdmin && Number.isSafeInteger(impersonateId) && impersonateId > 0 && user) {
 			const { getDb } = await import('$lib/server/db');
 			const client = getDb();
 			if (client) {
 				const impRes = await client.execute({
 					sql: 'SELECT id, username FROM users WHERE id = ?',
-					args: [Number(impersonateId)]
+					args: [impersonateId]
 				});
 				const impRow = impRes.rows[0];
 				if (impRow) {
@@ -36,9 +47,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 					};
 					event.locals.realAdmin = { ...user, isAdmin: true, role: 'admin' };
 					const resp = await resolve(event);
-					resp.headers.set('X-Frame-Options', 'SAMEORIGIN');
-					resp.headers.set('X-Content-Type-Options', 'nosniff');
-					resp.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+					applySecurityHeaders(resp);
 					return resp;
 				}
 			}
@@ -57,8 +66,6 @@ export const handle: Handle = async ({ event, resolve }) => {
 	}
 
 	const response = await resolve(event);
-	response.headers.set('X-Frame-Options', 'SAMEORIGIN');
-	response.headers.set('X-Content-Type-Options', 'nosniff');
-	response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+	applySecurityHeaders(response);
 	return response;
 };

@@ -1,11 +1,11 @@
 import { error } from '@sveltejs/kit';
-import { MAX_STAGES_PER_LEVEL, QUEST_STAGE_MAP, parseQuestChallenges } from '$lib/data/questLevels';
+import { QUEST_STAGE_MAP, parseQuestChallenges } from '$lib/data/questLevels';
 import { getStageOverrides } from '$lib/server/db';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params }) => {
 	const stage = QUEST_STAGE_MAP.get(params.stage);
-	if (!stage || stage.stageIndex > MAX_STAGES_PER_LEVEL) throw error(404, 'ไม่พบด่านนี้');
+	if (!stage) throw error(404, 'ไม่พบด่านนี้');
 
 	const override = (await getStageOverrides())[stage.id];
 	if (override?.isActive === false) throw error(404, 'ด่านนี้ยังไม่เปิดให้ใช้งาน');

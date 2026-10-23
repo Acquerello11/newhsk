@@ -1,7 +1,6 @@
 import { json, error, type RequestEvent } from '@sveltejs/kit';
 import {
 	recordPronunciationEvaluation,
-	recordPhonemeEvaluations,
 	getPronunciationEvaluations,
 	getPronunciationPhonemeErrorStats
 } from '$lib/server/db';
@@ -13,19 +12,32 @@ import {
 
 // GET /api/analytics/pronunciation
 // Query params:
-// - userId: user ID or UUID (defaults to logged-in user)
 // - mode: 'history' (list of evaluations) | 'stats' (aggregated phoneme error stats)
 // - limit: number of records (default: 50)
 export const GET = async ({ locals, url }: RequestEvent) => {
-	const paramUserId = url.searchParams.get('userId')?.trim();
-	const targetUserId = paramUserId || (locals.user ? String(locals.user.id) : null);
+<<<<<<< Updated upstream
+	// BUG-07 FIX: always use the authenticated session user — never trust a userId from the
+	// query string, as that would let any logged-in user read another user's data.
+	if (!locals.user) {
+		throw error(401, 'Authentication required.');
+=======
+	if (!locals.user) {
+		throw error(401, 'Login required to read pronunciation analytics.');
+>>>>>>> Stashed changes
+	}
+	const targetUserId = String(locals.user.id);
 
-	if (!targetUserId) {
-		throw error(400, 'Missing userId parameter or not authenticated.');
+	const ownUserId = String(locals.user.id);
+	const paramUserId = url.searchParams.get('userId')?.trim();
+	const isAdmin = Boolean(locals.user.isAdmin || locals.user.role === 'admin');
+
+	if (paramUserId && paramUserId !== ownUserId && !isAdmin) {
+		throw error(403, 'You can only read your own pronunciation analytics.');
 	}
 
+	const targetUserId = paramUserId || ownUserId;
 	const mode = url.searchParams.get('mode') || 'history';
-	const limit = Math.min(Number(url.searchParams.get('limit')) || 50, 200);
+	const limit = Math.max(1, Math.min(Number(url.searchParams.get('limit')) || 50, 200));
 
 	if (mode === 'stats') {
 		const stats = await getPronunciationPhonemeErrorStats(targetUserId);
@@ -45,6 +57,34 @@ export const GET = async ({ locals, url }: RequestEvent) => {
 	});
 };
 
+// POST /api/analytics/pronunciation
+// Body: LearnerPronunciationPayload or { items: LearnerPronunciationPayload[] }
+export const POST = async ({ locals, request }: RequestEvent) => {
+	let body: any;
+	try {
+		body = await request.json();
+	} catch {
+		throw error(400, 'Invalid JSON body');
+	}
+
+	// BUG-07 FIX: never trust user_id from the request body — a logged-in user could
+	// inject another user's ID to write data into their record (data poisoning).
+	// Always derive the userId from the server-side session instead.
+	const sessionUserId = locals.user ? String(locals.user.id) : null;
+	const userId = sessionUserId ?? 'anonymous';
+
+	const rawItems = Array.isArray(body)
+		? body
+		: Array.isArray(body.items)
+			? body.items
+			: [body];
+
+	if (rawItems.length === 0) {
+		throw error(400, 'No evaluation items provided.');
+	}
+
+	const processedItems: LearnerPronunciationPayload[] = [];
+
 function normalizeWordId(rawId: string): string {
 	if (!rawId) return '';
 	let clean = rawId.trim();
@@ -59,9 +99,21 @@ function normalizeWordId(rawId: string): string {
 	return clean;
 }
 
+<<<<<<< Updated upstream
+	for (const item of rawItems) {
+    const userId = String(locals.user?.user_id || 'usr_uuid_local');
+    const wordId = String(item.word_id || '');
+=======
 // POST /api/analytics/pronunciation
 // Body: LearnerPronunciationPayload or { items: LearnerPronunciationPayload[] }
 export const POST = async ({ locals, request }: RequestEvent) => {
+	if (!locals.user) {
+		throw error(401, 'Login required to record pronunciation analytics.');
+	}
+
+	// Identity is always taken from the session; never trust a client-supplied user_id.
+	const authenticatedUserId = String(locals.user.id);
+
 	let body: any;
 	try {
 		body = await request.json();
@@ -82,27 +134,20 @@ export const POST = async ({ locals, request }: RequestEvent) => {
 	const processedItems: LearnerPronunciationPayload[] = [];
 
 	for (const item of rawItems) {
-		const userId = String(item.user_id || (locals.user ? locals.user.id : 'usr_uuid_local'));
+		const userId = authenticatedUserId;
 		const wordId = normalizeWordId(String(item.word_id || ''));
 		const pinyin = String(item.pinyin || '');
 		const attemptNumber = Number(item.attempt_number || 1);
 		const audioDurationSec = Number(item.audio_duration_sec || 0);
-		const practiceMode = item.practice_mode === 'stage' || item.practice_mode === 'word'
-			? item.practice_mode
-			: item.practiceMode === 'stage' || item.practiceMode === 'word'
-				? item.practiceMode
-				: 'unknown';
-		const rawStageId = item.stage_id ?? item.stageId;
-		const stageId = typeof rawStageId === 'string' && /^[a-zA-Z0-9_-]{2,64}$/.test(rawStageId)
-			? rawStageId
-			: null;
+>>>>>>> Stashed changes
 
-		if (!wordId || !pinyin) {
-			continue;
-		}
-		if (practiceMode === 'stage' && !stageId) {
-			throw error(400, 'Stage practice evaluations must include a valid stage_id.');
-		}
+    const pinyin = String(item.pinyin || '');
+    const attemptNumber = Number(item.attempt_number || 1);
+    const audioDurationSec = Number(item.audio_duration_sec || 0);
+
+    if (!wordId || !pinyin) {
+        continue;
+    }
 
 		const phonemeDetails: PhonemeDetail[] = Array.isArray(item.scores?.phoneme_details)
 			? item.scores.phoneme_details.map((p: any) => ({
@@ -131,8 +176,6 @@ export const POST = async ({ locals, request }: RequestEvent) => {
 			user_id: userId || 'anonymous',
 			word_id: wordId,
 			pinyin,
-			practice_mode: practiceMode,
-			stage_id: stageId,
 			attempt_number: attemptNumber,
 			audio_duration_sec: Number(audioDurationSec.toFixed(2)),
 			scores: {
@@ -144,26 +187,6 @@ export const POST = async ({ locals, request }: RequestEvent) => {
 		};
 
 		await recordPronunciationEvaluation(validPayload);
-
-		// Also record detailed phoneme breakdown into phoneme_evaluations table
-		if (phonemeDetails.length > 0) {
-			await recordPhonemeEvaluations(
-				phonemeDetails.map((pd) => ({
-					userId,
-					wordId,
-					pinyin,
-					phoneme: pd.phoneme,
-					phonemeType: pd.type,
-					gop: pd.gop,
-					status: pd.status,
-					target: pd.target,
-					recognized: pd.recognized,
-					practiceMode,
-					stageId
-				}))
-			);
-		}
-
 		processedItems.push(validPayload);
 	}
 

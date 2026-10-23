@@ -6,7 +6,7 @@
 		user = null,
 		initiallyOpen = false
 	}: {
-		user?: { id: number; username: string; isAdmin?: boolean; role?: 'admin' | 'user'; isImpersonated?: boolean } | null;
+		user?: { id: number; username: string } | null;
 		initiallyOpen?: boolean;
 	} = $props();
 
@@ -20,14 +20,10 @@
 	let audioConsent = $state(true);
 	let researchConsent = $state(true);
 
+	// The server is the source of truth: it checks the consent record in the DB
+	// and only renders this modal when the learner has not consented yet.
 	$effect(() => {
-		isOpen = Boolean(
-			initiallyOpen &&
-			user?.id &&
-			!user.isAdmin &&
-			user.role !== 'admin' &&
-			!user.isImpersonated
-		);
+		isOpen = Boolean(initiallyOpen && user?.id);
 	});
 
 	async function requestMicrophonePermission(): Promise<boolean> {
@@ -62,13 +58,10 @@
 			await requestMicrophonePermission();
 		}
 
-		if (!user?.id) {
-			micError = 'ไม่พบผู้ใช้ที่เข้าสู่ระบบ กรุณาเข้าสู่ระบบใหม่';
-			return;
-		}
-		const userId = String(user.id);
+		const userId = user?.id ? String(user.id) : 'usr_uuid_local';
 		const userStorageKey = `yupakjeen_pdpa_consent_user_${userId}`;
 
+		// Save consent record locally per user
 		const consentData = {
 			userId,
 			termsAccepted,
@@ -79,27 +72,25 @@
 			consentedAt: new Date().toISOString()
 		};
 
+		localStorage.setItem(userStorageKey, JSON.stringify(consentData));
+
+		// Send consent log to backend API
 		try {
-			const response = await fetch('/api/v1/consent', {
+			fetch('/api/v1/consent', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
+					user_id: userId,
 					terms_accepted: termsAccepted,
 					audio_consent: audioConsent,
 					research_consent: researchConsent,
 					consent_version: 'v1.0'
 				})
-			});
-			const result = await response.json();
-			if (!response.ok || result.status !== 'success') {
-				throw new Error(result.message || 'ไม่สามารถบันทึกการยินยอมได้');
-			}
-			localStorage.setItem(userStorageKey, JSON.stringify(consentData));
-			isOpen = false;
-		} catch (err) {
-			micError = err instanceof Error ? err.message : 'ไม่สามารถบันทึกการยินยอมได้ กรุณาลองอีกครั้ง';
-		}
+			}).catch(() => {});
+		} catch {}
 
+		// Close modal
+		isOpen = false;
 	}
 </script>
 
@@ -183,7 +174,7 @@
 						class="mt-0.5 rounded border-input size-4 text-primary focus:ring-primary accent-primary"
 					/>
 					<span class="leading-tight text-foreground font-medium">
-						ยินยอมให้นำข้อมูลสถิติเชิงตัวเลข (คะแนนความแม่นยำ GOP, วรรณยุกต์, หน่วยเสียง) ไปใช้วิจัยและพัฒนาแบบไม่ระบุตัวตน
+						ยินยอมให้นำข้อมูลสถิติเชิงตัวเลข (คะแนน GOP, ความลังเล LQ6) ไปใช้วิจัยและพัฒนาแบบไม่ระบุตัวตน
 					</span>
 				</label>
 			</div>

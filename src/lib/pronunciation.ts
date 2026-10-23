@@ -1,7 +1,3 @@
-// Pronunciation Assessment & Phoneme-level Error Analysis types and utilities.
-// Standardized for Computer-Assisted Pronunciation Training (CAPT), GOP (Goodness of Pronunciation),
-// and PER (Phoneme Error Rate) analytics.
-
 import { segmentPinyinWord } from './vocabLoader';
 
 export type PhonemeType = 'initial' | 'final' | 'final_tone';
@@ -28,8 +24,6 @@ export interface LearnerPronunciationPayload {
 	user_id: string; // Learner ID or UUID, e.g. "usr_uuid_987654321"
 	word_id: string; // Vocabulary or lesson item ID, e.g. "chi_042"
 	pinyin: string; // Target pinyin string with marks or numbers, e.g. "zhī shi"
-	practice_mode?: 'stage' | 'word' | 'unknown';
-	stage_id?: string | null;
 	attempt_number: number; // Number of attempt for this session/word
 	audio_duration_sec: number; // Recorded audio duration in seconds
 	scores: PronunciationScores; // Detailed scores and phoneme breakdown
@@ -154,7 +148,7 @@ export function extractTargetPhonemes(pinyin: string): Array<{ phoneme: string; 
 
 	for (const syl of syllables) {
 		const { initial, finalTone } = splitPinyinSyllable(syl);
-		if (initial) {
+		if (initial && (PINYIN_INITIALS as readonly string[]).includes(initial)) {
 			result.push({ phoneme: initial, type: 'initial' });
 		}
 		if (finalTone) {
